@@ -1,13 +1,15 @@
-\
 """
 SuperBasic Video Editor
 A simple video editor with timeline selection, crop box, and export functionality.
 Runs on Windows with tkinter GUI.
 """
 
+# Disable FFmpeg async threading to prevent "async_lock failed" crashes on Windows
+import os
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "async;0"
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import os
 import sys
 import time
 import threading
