@@ -322,6 +322,8 @@ class VideoEditorApp:
         """Draw the visual timeline."""
         if not self.cap or not hasattr(self, 'timeline_canvas'):
             return
+        if self.duration <= 0:
+            return
 
         self.timeline_canvas.delete("all")
         tw = self.timeline_canvas.winfo_width() or 700
@@ -510,6 +512,10 @@ class VideoEditorApp:
     def _redraw(self):
         """Redraw the canvas with current frame and crop overlay."""
         if not self.cap:
+            return
+
+        # Guard: canvas may not be sized yet
+        if self.video_display_w <= 0 or self.video_display_h <= 0:
             return
 
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
