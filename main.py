@@ -68,11 +68,15 @@ class VideoEditorApp:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        # Left panel - Video preview
-        left_panel = ttk.LabelFrame(main_frame, text="Video Preview")
+        # Left panel - Video preview + Timeline
+        left_panel = ttk.Frame(main_frame)
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        self.canvas = tk.Canvas(left_panel, bg="black", width=720, height=405, highlightthickness=0)
+        # Video preview
+        preview_frame = ttk.LabelFrame(left_panel, text="Video Preview")
+        preview_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(5, 0))
+
+        self.canvas = tk.Canvas(preview_frame, bg="black", width=720, height=405, highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Bind events for crop box interaction
@@ -80,6 +84,22 @@ class VideoEditorApp:
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Configure>", self._on_canvas_resize)
+
+        # Timeline selection (under video)
+        timeline_frame = ttk.LabelFrame(left_panel, text="Timeline Selection")
+        timeline_frame.pack(fill=tk.X, padx=5, pady=(5, 5))
+
+        ttk.Label(timeline_frame, text="Start (s):").pack(anchor=tk.W, padx=5, pady=(5, 0))
+        self.start_scale = ttk.Scale(timeline_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_start)
+        self.start_scale.pack(fill=tk.X, padx=5, pady=2)
+        self.start_label = ttk.Label(timeline_frame, text="0.0s")
+        self.start_label.pack(anchor=tk.W, padx=5)
+
+        ttk.Label(timeline_frame, text="End (s):").pack(anchor=tk.W, padx=5, pady=(5, 0))
+        self.end_scale = ttk.Scale(timeline_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_end)
+        self.end_scale.pack(fill=tk.X, padx=5, pady=2)
+        self.end_label = ttk.Label(timeline_frame, text="0.0s")
+        self.end_label.pack(anchor=tk.W, padx=5)
 
         # Right panel - Controls
         right_panel = ttk.Frame(main_frame)
@@ -111,22 +131,6 @@ class VideoEditorApp:
 
         self.info_label = ttk.Label(playback_frame, text="No video loaded")
         self.info_label.pack(pady=5)
-
-        # Timeline
-        timeline_frame = ttk.LabelFrame(right_panel, text="Timeline Selection")
-        timeline_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        ttk.Label(timeline_frame, text="Start (s):").pack(anchor=tk.W, padx=5, pady=(5, 0))
-        self.start_scale = ttk.Scale(timeline_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_start)
-        self.start_scale.pack(fill=tk.X, padx=5, pady=2)
-        self.start_label = ttk.Label(timeline_frame, text="0.0s")
-        self.start_label.pack(anchor=tk.W, padx=5)
-
-        ttk.Label(timeline_frame, text="End (s):").pack(anchor=tk.W, padx=5, pady=(5, 0))
-        self.end_scale = ttk.Scale(timeline_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_end)
-        self.end_scale.pack(fill=tk.X, padx=5, pady=2)
-        self.end_label = ttk.Label(timeline_frame, text="0.0s")
-        self.end_label.pack(anchor=tk.W, padx=5)
 
         # Crop
         crop_frame = ttk.LabelFrame(right_panel, text="Crop Box")
