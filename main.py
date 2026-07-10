@@ -129,6 +129,10 @@ class VideoEditorApp:
         self.frame_scale_label = ttk.Label(scrub_frame, text="0.0s / 0.0s", font=("", 8))
         self.frame_scale_label.pack(side=tk.RIGHT, padx=5)
 
+        # Total frames display
+        self.total_frames_display = ttk.Label(timeline_frame, text="Total frames: -", font=("", 9, "bold"), foreground="#4a90d9")
+        self.total_frames_display.pack(anchor=tk.W, padx=5, pady=(3, 0))
+
         # Fixed duration option
         fixed_frame = ttk.Frame(timeline_frame)
         fixed_frame.pack(fill=tk.X, pady=(5, 0))
@@ -273,6 +277,7 @@ class VideoEditorApp:
             self._update_frame_scale_label()
 
             self.total_frames_label.config(text=str(self.total_frames))
+            self.total_frames_display.config(text=f"Total frames: {self.total_frames}")
             self.info_label.config(text=f"{self.fps:.1f} FPS | {self.total_frames} frames | {self.duration:.1f}s")
 
             self._recalc_video_display()
