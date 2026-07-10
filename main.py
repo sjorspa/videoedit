@@ -575,7 +575,7 @@ class VideoEditorApp:
         try:
             duration = self.end_time - self.start_time
             if duration <= 0:
-                self.root.after(0, lambda: messagebox.showerror("Error", "Invalid timeline selection."))
+                self.root.after(0, self._show_error, "Error", "Invalid timeline selection.")
                 return
 
             cmd = [
@@ -605,21 +605,44 @@ class VideoEditorApp:
                         parts = time_str.split(":")
                         current_sec = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
                         pct = min(int((current_sec / duration) * 100), 100)
-                        self.root.after(0, lambda p=pct: self._update_progress(p))
+                        self.root.after(0, self._update_progress, pct)
                     except (ValueError, IndexError):
                         pass
 
             process.wait()
 
             if process.returncode == 0:
-                self.root.after(0, lambda: self._export_done(output_path))
+                self.root.after(0, self._export_done, output_path)
             else:
-                self.root.after(0, lambda: messagebox.showerror(
-                    "Export Failed", "FFmpeg error.\\n\\nMake sure FFmpeg is installed."
-                ))
+                error_output = ""
+                if process.stderr:
+                    error_output = process.stderr.strip()
+                self.root.after(0, self._show_error, "Export Failed",
+                    f"FFmpeg failed with code {process.returncode}\n\n"
+                    f"Command: {' '.join(cmd)}\n\n"
+                    f"Output:\n{error_output[:1000]}"
+                )
 
+        except FileNotFoundError:
+            self.root.after(0, self._show_error, "Export Failed",
+                "FFmpeg is not found in your system PATH.\n\n"
+                "To fix this on Windows:\n"
+                "1. Download FFmpeg from: https://www.gyan.dev/ffmpeg/builds/\n"
+                "2. Extract the zip file\n"
+                "3. Add the 'bin' folder to your PATH:\n"
+                "   - Right-click 'This PC' > Properties > Advanced System Settings\n"
+                "   - Click 'Environment Variables'\n"
+                "   - Under 'System variables', find 'Path' and click Edit\n"
+                "   - Add a new entry with the path to the FFmpeg 'bin' folder\n"
+                "4. Restart this application\n\n"
+                "Alternatively, you can place ffmpeg.exe in the same folder as this script."
+            )
         except Exception as e:
-            self.root.after(0, lambda: messagebox.showerror("Export Failed", str(e)))
+            self.root.after(0, self._show_error, "Export Failed", f"Error: {str(e)}")
+
+    def _show_error(self, title, message):
+        """Show error message safely from any thread."""
+        messagebox.showerror(title, message)
 
     def _update_progress(self, pct):
         self.progress.config(value=pct)
