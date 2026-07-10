@@ -285,7 +285,7 @@ class VideoEditorApp:
         self.preview_image = Image.fromarray(frame_resized)
 
         # Draw crop box overlay
-        self._draw_crop_box()
+        self._draw_crop_overlay()
 
         # Convert to PhotoImage
         self.video_image = ImageTk.PhotoImage(self.preview_image)
@@ -296,90 +296,91 @@ class VideoEditorApp:
             anchor=tk.CENTER
         )
 
-    def _draw_crop_box(self):
-        """Draw the crop box overlay on the preview image."""
-        if not self.preview_image:
+    def _draw_crop_overlay(self):
+        """Draw crop box overlay on the preview image."""
+        if not self.preview_image or not self.cap:
             return
 
-        canvas_width = self.canvas.winfo_width() or 720
-        canvas_height = self.canvas.winfo_height() or 405
+        canvas_w = self.canvas.winfo_width() or 720
+        canvas_h = self.canvas.winfo_height() or 405
 
-        # Redraw the image
-        self.preview_image = Image.fromarray(
-            cv2.cvtColor(
-                cv2.resize(
-                    cv2.imread(self.video_path),
-                    (canvas_width, canvas_height)
-                ) if False else None,
-                cv2.COLOR_BGR2RGB
-            )
-        ) if False else Image.fromarray(
-            np.array(self.preview_image)
-        )
+        video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # Draw semi-transparent overlay
+        # Scale video to canvas
+        scale = min(canvas_w / video_w, canvas_h / video_h)
+        new_w = int(video_w * scale)
+        new_h = int(video_h * scale)
+
+        # Offset where video is drawn on canvas (centered)
+        offset_x = (canvas_w - new_w) // 2
+        offset_y = (canvas_h - new_h) // 2
+
+        # Scale factors: video pixels -> canvas pixels
+        scale_x = new_w / video_w
+        scale_y = new_h / video_h
+
+        # Convert crop box to canvas coordinates
+        box_x = offset_x + int(self.crop_x * scale_x)
+        box_y = offset_y + int(self.crop_y * scale_y)
+        box_w = int(self.crop_width * scale_x)
+        box_h = int(self.crop_height * scale_y)
+
+        # Draw overlay using PIL
         from PIL import ImageDraw
         draw = ImageDraw.Draw(self.preview_image)
 
-        # Convert crop coordinates to canvas coordinates
-        canvas_w = canvas_width
-        canvas_h = canvas_height
+        # Semi-transparent dark overlay outside crop area
+        overlay_color = (40, 40, 40)
+        
+        # Top area (above crop)
+        if box_y > 0:
+            draw.rectangle([0, 0, canvas_w, box_y], fill=overlay_color)
+        
+        # Bottom area (below crop)
+        if box_y + box_h < canvas_h:
+            draw.rectangle([0, box_y + box_h, canvas_w, canvas_h], fill=overlay_color)
+        
+        # Left area (left of crop)
+        if box_x > 0:
+            draw.rectangle([0, 0, box_x, canvas_h], fill=overlay_color)
+        
+        # Right area (right of crop)
+        if box_x + box_w < canvas_w:
+            draw.rectangle([box_x + box_w, 0, canvas_w, canvas_h], fill=overlay_color)
 
-        # Get video dimensions
-        if self.cap:
-            video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        else:
-            video_w, video_h = 1920, 1080
-
-        scale_x = canvas_w / video_w
-        scale_y = canvas_h / video_h
-
-        # Draw dark overlay outside crop area
-        draw.rectangle([0, 0, canvas_w, self.crop_y * scale_y], fill="gray", width=0)
-        draw.rectangle([0, self.crop_y * scale_y, canvas_w, canvas_h], fill="gray", width=0)
-        draw.rectangle([0, 0, self.crop_x * scale_x, canvas_h], fill="gray", width=0)
-        draw.rectangle([self.crop_x * scale_x, 0, canvas_w, canvas_h], fill="gray", width=0)
-
-        # Draw crop box border
-        box_x = self.crop_x * scale_x
-        box_y = self.crop_y * scale_y
-        box_w = self.crop_width * scale_x
-        box_h = self.crop_height * scale_y
-
+        # Crop box border (bright red, thicker)
         draw.rectangle(
             [box_x, box_y, box_x + box_w, box_y + box_h],
             outline="red",
-            width=3
+            width=4
         )
 
-        # Draw corner handles
-        handle_size = 8
+        # Corner handles (larger, more visible)
+        handle_size = 10
         corners = [
             (box_x, box_y),
+            (box_x + box_w, box_y + box_h),
             (box_x + box_w, box_y),
             (box_x, box_y + box_h),
-            (box_x + box_w, box_y + box_h)
         ]
         for cx, cy in corners:
             draw.rectangle(
                 [cx - handle_size, cy - handle_size, cx + handle_size, cy + handle_size],
-                fill="red"
+                fill="red",
+                outline="white",
+                width=2
             )
 
-        # Draw edge handles
+        # Edge handles (visible circles)
         edge_centers = [
-            (box_x + box_w // 2, box_y),  # top
-            (box_x + box_w // 2, box_y + box_h),  # bottom
-            (box_x, box_y + box_h // 2),  # left
-            (box_x + box_w, box_y + box_h // 2),  # right
+            (box_x + box_w // 2, box_y),
+            (box_x + box_w // 2, box_y + box_h),
+            (box_x, box_y + box_h // 2),
+            (box_x + box_w, box_y + box_h // 2),
         ]
         for ex, ey in edge_centers:
-            draw.ellipse(
-                [ex - 5, ey - 5, ex + 5, ey + 5],
-                fill="white",
-                outline="red"
-            )
+            draw.ellipse([ex - 6, ey - 6, ex + 6, ey + 6], fill="white", outline="red", width=2)
 
     def _on_canvas_click(self, event):
         """Handle mouse click on canvas to detect crop box interaction."""
@@ -388,7 +389,7 @@ class VideoEditorApp:
 
         x, y = event.x, event.y
 
-        # Check if click is on a handle or edge
+        # Get canvas and video dimensions
         canvas_w = self.canvas.winfo_width() or 720
         canvas_h = self.canvas.winfo_height() or 405
 
@@ -398,15 +399,26 @@ class VideoEditorApp:
         else:
             video_w, video_h = 1920, 1080
 
-        scale_x = canvas_w / video_w
-        scale_y = canvas_h / video_h
+        # Scale video to canvas
+        scale = min(canvas_w / video_w, canvas_h / video_h)
+        new_w = int(video_w * scale)
+        new_h = int(video_h * scale)
 
-        box_x = self.crop_x * scale_x
-        box_y = self.crop_y * scale_y
-        box_w = self.crop_width * scale_x
-        box_h = self.crop_height * scale_y
+        # Offset where video is drawn on canvas (centered)
+        offset_x = (canvas_w - new_w) // 2
+        offset_y = (canvas_h - new_h) // 2
 
-        # Check corners (larger hit area)
+        # Scale factors: video pixels -> canvas pixels
+        scale_x = new_w / video_w
+        scale_y = new_h / video_h
+
+        # Convert crop box to canvas coordinates
+        box_x = offset_x + int(self.crop_x * scale_x)
+        box_y = offset_y + int(self.crop_y * scale_y)
+        box_w = int(self.crop_width * scale_x)
+        box_h = int(self.crop_height * scale_y)
+
+        # Check corners first (larger hit area)
         handle_threshold = 15
         corners = [
             ('nw', box_x, box_y),
@@ -471,72 +483,82 @@ class VideoEditorApp:
         canvas_w = self.canvas.winfo_width() or 720
         canvas_h = self.canvas.winfo_height() or 405
 
-        scale_x = video_w / canvas_w
-        scale_y = video_h / canvas_h
+        # Scale: canvas pixels -> video pixels
+        scale = min(canvas_w / video_w, canvas_h / video_h)
+        new_w = int(video_w * scale)
+        new_h = int(video_h * scale)
+        offset_x = (canvas_w - new_w) // 2
+        offset_y = (canvas_h - new_h) // 2
+
+        # Convert canvas delta to video delta
+        scale_x = video_w / new_w
+        scale_y = video_h / new_h
+        video_dx = dx * scale_x
+        video_dy = dy * scale_y
 
         if self.drag_edge == 'move':
             # Move box
-            new_x = self.crop_x + dx * scale_x
-            new_y = self.crop_y + dy * scale_y
+            new_x = self.crop_x + video_dx
+            new_y = self.crop_y + video_dy
             # Clamp
             self.crop_x = max(0, min(new_x, video_w - self.crop_width))
             self.crop_y = max(0, min(new_y, video_h - self.crop_height))
         elif self.drag_edge == 'nw':
-            new_x = self.crop_x + dx * scale_x
-            new_y = self.crop_y + dy * scale_y
-            new_w = self.crop_width - dx * scale_x
-            new_h = self.crop_height - dy * scale_y
-            if new_w > 20:
+            new_x = self.crop_x + video_dx
+            new_y = self.crop_y + video_dy
+            new_w_crop = self.crop_width - video_dx
+            new_h_crop = self.crop_height - video_dy
+            if new_w_crop > 20:
                 self.crop_x = new_x
-                self.crop_width = new_w
-            if new_h > 20:
+                self.crop_width = new_w_crop
+            if new_h_crop > 20:
                 self.crop_y = new_y
-                self.crop_height = new_h
+                self.crop_height = new_h_crop
         elif self.drag_edge == 'se':
-            new_w = self.crop_width + dx * scale_x
-            new_h = self.crop_height + dy * scale_y
-            if self.crop_x + new_w <= video_w and new_w > 20:
-                self.crop_width = new_w
-            if self.crop_y + new_h <= video_h and new_h > 20:
-                self.crop_height = new_h
+            new_w_crop = self.crop_width + video_dx
+            new_h_crop = self.crop_height + video_dy
+            if self.crop_x + new_w_crop <= video_w and new_w_crop > 20:
+                self.crop_width = new_w_crop
+            if self.crop_y + new_h_crop <= video_h and new_h_crop > 20:
+                self.crop_height = new_h_crop
         elif self.drag_edge == 'ne':
-            new_y = self.crop_y + dy * scale_y
-            new_h = self.crop_height - dy * scale_y
-            new_w = self.crop_width + dx * scale_x
-            if new_h > 20:
+            new_y = self.crop_y + video_dy
+            new_h_crop = self.crop_height - video_dy
+            new_w_crop = self.crop_width + video_dx
+            if new_h_crop > 20:
                 self.crop_y = new_y
-                self.crop_height = new_h
-            if self.crop_x + new_w <= video_w and new_w > 20:
-                self.crop_width = new_w
+                self.crop_height = new_h_crop
+            if self.crop_x + new_w_crop <= video_w and new_w_crop > 20:
+                self.crop_width = new_w_crop
         elif self.drag_edge == 'sw':
-            new_x = self.crop_x + dx * scale_x
-            new_w = self.crop_width - dx * scale_x
-            new_h = self.crop_height + dy * scale_y
-            if new_w > 20:
+            new_x = self.crop_x + video_dx
+            new_w_crop = self.crop_width - video_dx
+            new_h_crop = self.crop_height + video_dy
+            if new_w_crop > 20:
                 self.crop_x = new_x
-                self.crop_width = new_w
-            if self.crop_y + new_h <= video_h and new_h > 20:
-                self.crop_height = new_h
+                self.crop_width = new_w_crop
+            if self.crop_y + new_h_crop <= video_h and new_h_crop > 20:
+                self.crop_height = new_h_crop
         elif self.drag_edge == 'n':
-            new_y = self.crop_y + dy * scale_y
-            new_h = self.crop_height - dy * scale_y
-            if new_h > 20:
+            new_y = self.crop_y + video_dy
+            new_h_crop = self.crop_height - video_dy
+            if new_h_crop > 20:
                 self.crop_y = new_y
-                self.crop_height = new_h
+                self.crop_height = new_h_crop
         elif self.drag_edge == 's':
-            new_h = self.crop_height + dy * scale_y
-            if self.crop_y + new_h <= video_h and new_h > 20:
-                self.crop_height = new_h
+            new_h_crop = self.crop_height + video_dy
+            if self.crop_y + new_h_crop <= video_h and new_h_crop > 20:
+                self.crop_height = new_h_crop
         elif self.drag_edge == 'e':
-            new_w = self.crop_width + dx * scale_x
-            if self.crop_x + new_w <= video_w and new_w > 20:
-                self.crop_width = new_w
+            new_w_crop = self.crop_width + video_dx
+            if self.crop_x + new_w_crop <= video_w and new_w_crop > 20:
+                self.crop_width = new_w_crop
         elif self.drag_edge == 'w':
-            new_x = self.crop_x + dx * scale_x
-            new_w = self.crop_width - dx * scale_x
-            if new_w > 20:
+            new_x = self.crop_x + video_dx
+            new_w_crop = self.crop_width - video_dx
+            if new_w_crop > 20:
                 self.crop_x = new_x
-                self.crop_width = new_w
+                self.crop_width = new_w_crop
 
         self.drag_start = (x, y)
         self._update_crop_info()
@@ -596,39 +618,55 @@ class VideoEditorApp:
         frame_resized = cv2.resize(frame, (new_w, new_h))
         self.preview_image = Image.fromarray(frame_resized)
 
-        # Draw crop box overlay
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(self.preview_image)
-
+        # Calculate crop box in canvas coordinates
         canvas_w = canvas_width
         canvas_h = canvas_height
 
-        video_w = w
-        video_h = h
+        # Scale factors: video pixels -> canvas pixels
+        scale_x = new_w / w
+        scale_y = new_h / h
 
-        scale_x = canvas_w / video_w
-        scale_y = canvas_h / video_h
+        # Crop box position in canvas coords (centered)
+        offset_x = (canvas_w - new_w) // 2
+        offset_y = (canvas_h - new_h) // 2
 
-        # Dark overlay
-        draw.rectangle([0, 0, canvas_w, int(self.crop_y * scale_y)], fill="gray", width=0)
-        draw.rectangle([0, int(self.crop_y * scale_y), canvas_w, canvas_h], fill="gray", width=0)
-        draw.rectangle([0, 0, int(self.crop_x * scale_x), canvas_h], fill="gray", width=0)
-        draw.rectangle([int(self.crop_x * scale_x), 0, canvas_w, canvas_h], fill="gray", width=0)
-
-        # Crop box
-        box_x = int(self.crop_x * scale_x)
-        box_y = int(self.crop_y * scale_y)
+        box_x = offset_x + int(self.crop_x * scale_x)
+        box_y = offset_y + int(self.crop_y * scale_y)
         box_w = int(self.crop_width * scale_x)
         box_h = int(self.crop_height * scale_y)
 
+        # Draw crop box overlay using PIL
+        from PIL import ImageDraw
+        draw = ImageDraw.Draw(self.preview_image)
+
+        # Semi-transparent dark overlay outside crop area (40% opacity)
+        overlay_color = (40, 40, 40, 180)
+        
+        # Top area (above crop)
+        if box_y > 0:
+            draw.rectangle([0, 0, canvas_w, box_y], fill=overlay_color)
+        
+        # Bottom area (below crop)
+        if box_y + box_h < canvas_h:
+            draw.rectangle([0, box_y + box_h, canvas_w, canvas_h], fill=overlay_color)
+        
+        # Left area (left of crop)
+        if box_x > 0:
+            draw.rectangle([0, 0, box_x, canvas_h], fill=overlay_color)
+        
+        # Right area (right of crop)
+        if box_x + box_w < canvas_w:
+            draw.rectangle([box_x + box_w, 0, canvas_w, canvas_h], fill=overlay_color)
+
+        # Crop box border (bright red, thicker)
         draw.rectangle(
             [box_x, box_y, box_x + box_w, box_y + box_h],
             outline="red",
-            width=3
+            width=4
         )
 
-        # Corner handles
-        handle_size = 8
+        # Corner handles (larger, more visible)
+        handle_size = 10
         corners = [
             (box_x, box_y),
             (box_x + box_w, box_y + box_h),
@@ -638,10 +676,12 @@ class VideoEditorApp:
         for cx, cy in corners:
             draw.rectangle(
                 [cx - handle_size, cy - handle_size, cx + handle_size, cy + handle_size],
-                fill="red"
+                fill="red",
+                outline="white",
+                width=2
             )
 
-        # Edge handles
+        # Edge handles (visible circles)
         edge_centers = [
             (box_x + box_w // 2, box_y),
             (box_x + box_w // 2, box_y + box_h),
@@ -649,7 +689,7 @@ class VideoEditorApp:
             (box_x + box_w, box_y + box_h // 2),
         ]
         for ex, ey in edge_centers:
-            draw.ellipse([ex - 5, ey - 5, ex + 5, ey + 5], fill="white", outline="red")
+            draw.ellipse([ex - 6, ey - 6, ex + 6, ey + 6], fill="white", outline="red", width=2)
 
         self.video_image = ImageTk.PhotoImage(self.preview_image)
 
