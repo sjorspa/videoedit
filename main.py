@@ -4,13 +4,9 @@ A simple video editor with timeline selection, crop box, and export functionalit
 Runs on Windows with tkinter GUI.
 """
 
-# Disable FFmpeg async threading to prevent "async_lock failed" crashes on Windows
-# MUST be set before cv2 import
-import os
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "async;0|thread_count;1"
-
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+import os
 import sys
 import time
 import threading
@@ -258,16 +254,11 @@ class VideoEditorApp:
         self.root.update()
 
         try:
-            # Try FFmpeg backend first (with async disabled)
-            self.cap = cv2.VideoCapture(self.video_path, cv2.CAP_FFMPEG)
-            if not self.cap.isOpened():
-                # Fallback to default backend
-                self.cap = cv2.VideoCapture(self.video_path)
+            # Use default backend (avoids FFmpeg async_lock crashes on Windows)
+            self.cap = cv2.VideoCapture(self.video_path)
             if not self.cap.isOpened():
                 messagebox.showerror("Error", "Failed to open video file.")
                 return
-            # Ensure no threading to prevent crashes
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
             self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -758,7 +749,7 @@ class VideoEditorApp:
             return
         self.is_playing = True
         self.play_btn.config(text="Pause")
-        threading.Thread(target=self._playback_loop, daemon=True).start()
+        self.root.after(0, self._playback_loop)
 
     def _pause(self):
         self.is_playing = False
@@ -773,18 +764,19 @@ class VideoEditorApp:
         self._redraw()
 
     def _playback_loop(self):
-        if not self.cap:
+        """Play video using root.after() instead of background thread."""
+        if not self.cap or not self.is_playing:
             return
-        while self.is_playing:
-            ret, frame = self.cap.read()
-            if not ret:
-                # Video ended
-                self.root.after(0, self._pause)
-                break
-            self.current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
-            self.root.after(0, self._update_frame)
-            time.sleep(1.0 / self.fps)
-        self.root.after(0, self._redraw)
+        ret, frame = self.cap.read()
+        if not ret:
+            # Video ended
+            self.is_playing = False
+            self.play_btn.config(text="Play")
+            self._redraw()
+            return
+        self.current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
+        self._update_frame()
+        self.root.after(int(1000 / self.fps), self._playback_loop)
 
     def _update_frame(self):
         self.frame_entry.delete(0, tk.END)
