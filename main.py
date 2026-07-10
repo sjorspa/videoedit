@@ -767,14 +767,13 @@ class VideoEditorApp:
         if not self.cap:
             return
         while self.is_playing:
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
             ret, frame = self.cap.read()
             if not ret:
                 # Video ended
                 self.root.after(0, self._pause)
                 break
+            self.current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
             self.root.after(0, self._update_frame)
-            self.current_frame += 1
             time.sleep(1.0 / self.fps)
         self.root.after(0, self._redraw)
 
