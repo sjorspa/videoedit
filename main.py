@@ -106,6 +106,15 @@ class VideoEditorApp:
         self.timeline_end_label = ttk.Label(info_frame, text="End: 0.0s", font=("", 8))
         self.timeline_end_label.pack(side=tk.RIGHT, padx=5)
 
+        # Frame scrubber slider (in seconds)
+        scrub_frame = ttk.Frame(timeline_frame)
+        scrub_frame.pack(fill=tk.X, pady=(5, 0))
+        ttk.Label(scrub_frame, text="Playhead:", font=("", 8)).pack(side=tk.LEFT, padx=5)
+        self.frame_scale = ttk.Scale(scrub_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_frame_slider)
+        self.frame_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.frame_scale_label = ttk.Label(scrub_frame, text="0.0s / 0.0s", font=("", 8))
+        self.frame_scale_label.pack(side=tk.RIGHT, padx=5)
+
         # Right panel - Controls
         right_panel = ttk.Frame(main_frame)
         right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
@@ -212,6 +221,11 @@ class VideoEditorApp:
             self.start_time = 0.0
             self.end_time = self.duration
             self._draw_timeline()
+
+            # Initialize frame slider
+            self.frame_scale.config(from_=0, to=self.duration)
+            self.frame_scale.set(0)
+            self._update_frame_scale_label()
 
             self.total_frames_label.config(text=str(self.total_frames))
             self.info_label.config(text=f"{self.fps:.1f} FPS | {self.total_frames} frames | {self.duration:.1f}s")
@@ -589,6 +603,23 @@ class VideoEditorApp:
         """Called when end slider changes - kept for compatibility."""
         pass
 
+    def _on_frame_slider(self, value):
+        """Handle frame scrubber slider movement."""
+        if not self.cap or not self.duration:
+            return
+        time_sec = float(value)
+        # Convert time to frame number
+        self.current_frame = int((time_sec / self.duration) * self.total_frames)
+        self.current_frame = max(0, min(self.current_frame, self.total_frames - 1))
+        self._redraw()
+        self._update_playhead()
+        self._update_frame_scale_label()
+
+    def _update_frame_scale_label(self):
+        """Update the frame scale label."""
+        current_sec = self.current_frame / self.fps if self.fps else 0
+        self.frame_scale_label.config(text=f"{current_sec:.1f}s / {self.duration:.1f}s")
+
     def _toggle_play(self):
         if not self.cap:
             messagebox.showwarning("Warning", "Please upload a video first.")
@@ -640,6 +671,8 @@ class VideoEditorApp:
         self.frame_entry.insert(0, str(self.current_frame))
         self._redraw()
         self._update_playhead()
+        self.frame_scale.set(self.current_frame / self.fps if self.fps else 0)
+        self._update_frame_scale_label()
 
     def _on_frame_change(self, event):
         if not self.cap:
