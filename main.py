@@ -470,6 +470,25 @@ class VideoEditorApp:
                 self.end_time = min(self.duration, self.start_time + 0.1)
 
         self._draw_timeline()
+        
+        # Jump to the dragged frame when releasing
+        if not hasattr(self, '_timeline_drag_timer'):
+            self._timeline_drag_timer = None
+        
+        if self._timeline_drag_timer is not None:
+            self.root.after_cancel(self._timeline_drag_timer)
+        
+        def _jump_to_frame():
+            if self.cap:
+                frame_num = int(new_time * self.fps)
+                frame_num = max(0, min(frame_num, self.total_frames - 1))
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                self.current_frame = frame_num
+                self._redraw()
+                self._update_playhead()
+                self._update_frame_scale_label()
+        
+        self._timeline_drag_timer = self.root.after(150, _jump_to_frame)
 
     def _on_fixed_duration_toggle(self):
         """Handle fixed duration checkbox toggle."""
