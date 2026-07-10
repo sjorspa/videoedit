@@ -209,14 +209,9 @@ class VideoEditorApp:
             self.video_orig_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.video_orig_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-            self.start_scale.config(to=self.duration)
-            self.end_scale.config(to=self.duration)
             self.start_time = 0.0
             self.end_time = self.duration
-            self.start_scale.set(0)
-            self.end_scale.set(1.0)
-            self.start_label.config(text="0.0s")
-            self.end_label.config(text=f"{self.duration:.1f}s")
+            self._draw_timeline()
 
             self.total_frames_label.config(text=str(self.total_frames))
             self.info_label.config(text=f"{self.fps:.1f} FPS | {self.total_frames} frames | {self.duration:.1f}s")
@@ -587,20 +582,12 @@ class VideoEditorApp:
         self.drag_edge = None
 
     def _on_start(self, value):
-        self.start_time = float(value)
-        self.start_label.config(text=f"{self.start_time:.2f}s")
-        if self.start_time >= self.end_time:
-            self.start_time = max(0, self.end_time - 0.1)
-            self.start_scale.set(self.start_time)
-            self.start_label.config(text=f"{self.start_time:.2f}s")
+        """Called when start slider changes - kept for compatibility."""
+        pass
 
     def _on_end(self, value):
-        self.end_time = float(value)
-        self.end_label.config(text=f"{self.end_time:.2f}s")
-        if self.end_time <= self.start_time:
-            self.end_time = min(self.duration, self.start_time + 0.1)
-            self.end_scale.set(self.end_time)
-            self.end_label.config(text=f"{self.end_time:.2f}s")
+        """Called when end slider changes - kept for compatibility."""
+        pass
 
     def _toggle_play(self):
         if not self.cap:
