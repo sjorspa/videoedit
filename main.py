@@ -1,3 +1,4 @@
+\
 """
 SuperBasic Video Editor
 A simple video editor with timeline selection, crop box, and export functionality.
@@ -13,7 +14,7 @@ import threading
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
-import tempfile
+import subprocess
 
 
 class VideoEditorApp:
@@ -33,40 +34,37 @@ class VideoEditorApp:
         self.duration = 0
         self.current_frame = 0
         self.is_playing = False
-        self.playback_thread = None
 
-        # Selection state
-        self.start_slider = 0.0  # seconds
-        self.end_slider = 0.0  # seconds
-        
-        # Crop box stored in CANVAS coordinates (for direct mouse interaction)
-        self.canvas_crop_x = 0
-        self.canvas_crop_y = 0
-        self.canvas_crop_w = 0
-        self.canvas_crop_h = 0
-        
-        # Video dimensions for export conversion
-        self.video_w = 0
-        self.video_h = 0
-        
+        # Timeline selection
+        self.start_time = 0.0
+        self.end_time = 0.0
+
+        # Crop box in CANVAS pixels (direct mouse interaction)
+        self.crop_x = 0
+        self.crop_y = 0
+        self.crop_w = 0
+        self.crop_h = 0
+
+        # Video display info (where video is drawn on canvas)
+        self.video_display_x = 0
+        self.video_display_y = 0
+        self.video_display_w = 0
+        self.video_display_h = 0
+        self.video_orig_w = 0
+        self.video_orig_h = 0
+
+        # Drag state
         self.is_dragging = False
         self.drag_start = None
-        self.drag_edge = None  # 'nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w', 'move'
+        self.drag_edge = None
 
-        # UI state
-        self.video_image = None  # Keep reference to prevent garbage collection
-        self.canvas_image = None
-        self.preview_image = None
+        # UI reference
+        self.video_image = None
 
-        # Export state
-        self.is_exporting = False
-
-        # Build UI
         self._setup_ui()
 
     def _setup_ui(self):
         """Setup the user interface."""
-        # Main container
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -74,153 +72,113 @@ class VideoEditorApp:
         left_panel = ttk.LabelFrame(main_frame, text="Video Preview")
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        # Canvas for video display with crop box
-        self.canvas = tk.Canvas(
-            left_panel,
-            bg="black",
-            width=720,
-            height=405,
-            highlightthickness=0
-        )
+        self.canvas = tk.Canvas(left_panel, bg="black", width=720, height=405, highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self.canvas.bind("<Button-1>", self._on_canvas_click)
-        self.canvas.bind("<B1-Motion>", self._on_canvas_drag)
-        self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
+
+        # Bind events for crop box interaction
+        self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<B1-Motion>", self._on_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_release)
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
 
         # Right panel - Controls
         right_panel = ttk.Frame(main_frame)
         right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
 
-        # Upload button
-        upload_btn = ttk.Button(
-            right_panel,
-            text="📁 Upload Video",
-            command=self._upload_video
-        )
-        upload_btn.pack(fill=tk.X, padx=5, pady=5)
+        # Upload
+        ttk.Button(right_panel, text="Upload Video", command=self._upload_video).pack(fill=tk.X, padx=5, pady=5)
 
-        # Playback controls
+        # Playback
         playback_frame = ttk.LabelFrame(right_panel, text="Playback")
         playback_frame.pack(fill=tk.X, padx=5, pady=5)
 
         btn_frame = ttk.Frame(playback_frame)
         btn_frame.pack(fill=tk.X, pady=5)
-
-        self.play_btn = ttk.Button(btn_frame, text="▶ Play", command=self._toggle_play)
+        self.play_btn = ttk.Button(btn_frame, text="Play", command=self._toggle_play)
         self.play_btn.pack(side=tk.LEFT, padx=2)
-
-        ttk.Button(btn_frame, text="⏸ Pause", command=self._pause).pack(side=tk.LEFT, padx=2)
-        ttk.Button(btn_frame, text="⏹ Stop", command=self._stop).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="Pause", command=self._pause).pack(side=tk.LEFT, padx=2)
+        ttk.Button(btn_frame, text="Stop", command=self._stop).pack(side=tk.LEFT, padx=2)
 
         # Frame scrubber
         scrub_frame = ttk.Frame(playback_frame)
         scrub_frame.pack(fill=tk.X, pady=5)
-
         ttk.Label(scrub_frame, text="Frame:").pack(side=tk.LEFT, padx=(0, 5))
         self.frame_entry = ttk.Entry(scrub_frame, width=8)
         self.frame_entry.pack(side=tk.LEFT, padx=2)
         self.frame_entry.bind("<Return>", self._on_frame_change)
-
-        ttk.Label(scrub_frame, text="/").pack(side=tk.LEFT, padx=2)
-        ttk.Label(scrub_frame, textvariable=tk.StringVar()).pack(side=tk.LEFT)
         self.total_frames_label = ttk.Label(scrub_frame, text="0")
         self.total_frames_label.pack(side=tk.LEFT, padx=2)
 
-        # Info label
         self.info_label = ttk.Label(playback_frame, text="No video loaded")
         self.info_label.pack(pady=5)
 
-        # Timeline selection
+        # Timeline
         timeline_frame = ttk.LabelFrame(right_panel, text="Timeline Selection")
         timeline_frame.pack(fill=tk.X, padx=5, pady=5)
 
         ttk.Label(timeline_frame, text="Start (s):").pack(anchor=tk.W, padx=5, pady=(5, 0))
-        self.start_scale = ttk.Scale(
-            timeline_frame,
-            from_=0,
-            to=100,
-            orient=tk.HORIZONTAL,
-            command=self._on_start_slider
-        )
+        self.start_scale = ttk.Scale(timeline_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_start)
         self.start_scale.pack(fill=tk.X, padx=5, pady=2)
-        self.start_value_label = ttk.Label(timeline_frame, text="0.0s")
-        self.start_value_label.pack(anchor=tk.W, padx=5)
+        self.start_label = ttk.Label(timeline_frame, text="0.0s")
+        self.start_label.pack(anchor=tk.W, padx=5)
 
         ttk.Label(timeline_frame, text="End (s):").pack(anchor=tk.W, padx=5, pady=(5, 0))
-        self.end_scale = ttk.Scale(
-            timeline_frame,
-            from_=0,
-            to=100,
-            orient=tk.HORIZONTAL,
-            command=self._on_end_slider
-        )
+        self.end_scale = ttk.Scale(timeline_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_end)
         self.end_scale.pack(fill=tk.X, padx=5, pady=2)
-        self.end_value_label = ttk.Label(timeline_frame, text="0.0s")
-        self.end_value_label.pack(anchor=tk.W, padx=5)
+        self.end_label = ttk.Label(timeline_frame, text="0.0s")
+        self.end_label.pack(anchor=tk.W, padx=5)
 
-        # Crop box controls
+        # Crop
         crop_frame = ttk.LabelFrame(right_panel, text="Crop Box")
         crop_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        self.crop_info_label = ttk.Label(crop_frame, text="Drag box on preview")
-        self.crop_info_label.pack(pady=5)
-
-        ttk.Button(
-            crop_frame,
-            text="Reset Crop",
-            command=self._reset_crop
-        ).pack(fill=tk.X, padx=5, pady=2)
-
-        ttk.Button(
-            crop_frame,
-            text="Fit to Video",
-            command=self._fit_crop
-        ).pack(fill=tk.X, padx=5, pady=2)
+        self.crop_label = ttk.Label(crop_frame, text="Drag box on preview")
+        self.crop_label.pack(pady=5)
+        ttk.Button(crop_frame, text="Reset Crop", command=self._reset_crop).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(crop_frame, text="Fit to Video", command=self._fit_crop).pack(fill=tk.X, padx=5, pady=2)
 
         # Export
         export_frame = ttk.LabelFrame(right_panel, text="Export")
         export_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        self.export_btn = ttk.Button(
-            export_frame,
-            text="💾 Export Video",
-            command=self._export_video
-        )
+        self.export_btn = ttk.Button(export_frame, text="Export Video", command=self._export_video)
         self.export_btn.pack(fill=tk.X, padx=5, pady=5)
-
-        self.progress = ttk.Progressbar(
-            export_frame,
-            orient=tk.HORIZONTAL,
-            length=200,
-            mode="determinate"
-        )
+        self.progress = ttk.Progressbar(export_frame, orient=tk.HORIZONTAL, length=200, mode="determinate")
         self.progress.pack(fill=tk.X, padx=5, pady=5)
-
         self.status_label = ttk.Label(export_frame, text="Ready")
         self.status_label.pack(pady=5)
 
-        # Status bar at bottom
-        self.status_bar = ttk.Label(
-            self.root,
-            text="Ready - Upload a video to start",
-            relief=tk.SUNKEN,
-            anchor=tk.W
-        )
+        # Status bar
+        self.status_bar = ttk.Label(self.root, text="Ready - Upload a video to start", relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
+
+    def _on_canvas_resize(self, event):
+        """Handle canvas resize."""
+        if self.cap:
+            self._recalc_video_display()
+            self._redraw()
+
+    def _recalc_video_display(self):
+        """Recalculate where the video is drawn on the canvas."""
+        canvas_w = self.canvas.winfo_width()
+        canvas_h = self.canvas.winfo_height()
+        if canvas_w <= 0:
+            canvas_w = 720
+        if canvas_h <= 0:
+            canvas_h = 405
+
+        scale = min(canvas_w / self.video_orig_w, canvas_h / self.video_orig_h)
+        self.video_display_w = int(self.video_orig_w * scale)
+        self.video_display_h = int(self.video_orig_h * scale)
+        self.video_display_x = (canvas_w - self.video_display_w) // 2
+        self.video_display_y = (canvas_h - self.video_display_h) // 2
 
     def _upload_video(self):
         """Open file dialog to upload a video."""
         file_path = filedialog.askopenfilename(
             title="Select Video",
-            filetypes=[
-                ("Video files", "*.mp4 *.avi *.mov *.mkv *.wmv *.flv"),
-                ("All files", "*.*")
-            ]
+            filetypes=[("Video files", "*.mp4 *.avi *.mov *.mkv *.wmv *.flv"), ("All files", "*.*")]
         )
-
         if not file_path:
             return
-
         self.video_path = file_path
         self._load_video()
 
@@ -231,7 +189,6 @@ class VideoEditorApp:
 
         try:
             self.cap = cv2.VideoCapture(self.video_path)
-
             if not self.cap.isOpened():
                 messagebox.showerror("Error", "Failed to open video file.")
                 return
@@ -240,243 +197,173 @@ class VideoEditorApp:
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             self.duration = self.total_frames / self.fps
 
-            # Set up sliders
+            self.video_orig_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.video_orig_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
             self.start_scale.config(to=self.duration)
             self.end_scale.config(to=self.duration)
-            self.end_scale.set(1.0)  # Default to end
-
-            self.start_slider = 0.0
-            self.end_slider = self.duration
+            self.start_time = 0.0
+            self.end_time = self.duration
+            self.start_scale.set(0)
+            self.end_scale.set(1.0)
+            self.start_label.config(text="0.0s")
+            self.end_label.config(text=f"{self.duration:.1f}s")
 
             self.total_frames_label.config(text=str(self.total_frames))
             self.info_label.config(text=f"{self.fps:.1f} FPS | {self.total_frames} frames | {self.duration:.1f}s")
 
-            # Store video dimensions for export
-            self.video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            self.video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-            # Reset crop to full video (in canvas coords)
+            self._recalc_video_display()
             self._fit_crop()
 
-            # Load first frame for preview
-            self._update_preview()
+            self.current_frame = 0
+            self._redraw()
 
             self.status_bar.config(text=f"Loaded: {os.path.basename(self.video_path)}")
 
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to load video:\n{str(e)}")
+            messagebox.showerror("Error", f"Failed to load video:\\n{str(e)}")
 
-    def _update_preview(self):
-        """Update the canvas with the current frame."""
+    def _fit_crop(self):
+        """Fit crop box to the video display area on canvas."""
+        self.crop_x = self.video_display_x
+        self.crop_y = self.video_display_y
+        self.crop_w = self.video_display_w
+        self.crop_h = self.video_display_h
+        self._update_crop_label()
+        self._redraw()
+
+    def _reset_crop(self):
+        """Reset crop to full canvas."""
+        canvas_w = self.canvas.winfo_width() or 720
+        canvas_h = self.canvas.winfo_height() or 405
+        self.crop_x = 0
+        self.crop_y = 0
+        self.crop_w = canvas_w
+        self.crop_h = canvas_h
+        self._update_crop_label()
+        self._redraw()
+
+    def _update_crop_label(self):
+        """Update crop info label."""
+        self.crop_label.config(text=f"X={self.crop_x} Y={self.crop_y} W={self.crop_w} H={self.crop_h}")
+
+    def _redraw(self):
+        """Redraw the canvas with current frame and crop overlay."""
         if not self.cap:
             return
 
-        # Seek to current frame
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
         ret, frame = self.cap.read()
-
         if not ret:
             return
 
-        # Convert BGR to RGB
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame_resized = cv2.resize(frame, (self.video_display_w, self.video_display_h))
+        self.video_image = ImageTk.PhotoImage(Image.fromarray(frame_resized))
 
-        # Scale to fit canvas
-        canvas_width = self.canvas.winfo_width() or 720
-        canvas_height = self.canvas.winfo_height() or 405
-
-        h, w = frame.shape[:2]
-        scale = min(canvas_width / w, canvas_height / h)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-
-        frame_resized = cv2.resize(frame, (new_w, new_h))
-
-        # Convert to PIL Image
-        self.preview_image = Image.fromarray(frame_resized)
-
-        # Draw crop box overlay
-        self._draw_crop_overlay()
-
-        # Convert to PhotoImage
-        self.video_image = ImageTk.PhotoImage(self.preview_image)
+        canvas_w = self.canvas.winfo_width() or 720
+        canvas_h = self.canvas.winfo_height() or 405
+        self.canvas.delete("all")
         self.canvas.create_image(
-            canvas_width // 2,
-            canvas_height // 2,
+            self.video_display_x + self.video_display_w // 2,
+            self.video_display_y + self.video_display_h // 2,
             image=self.video_image,
             anchor=tk.CENTER
         )
+        self._draw_crop_overlay()
 
     def _draw_crop_overlay(self):
-        """Draw crop box overlay on the preview image."""
-        if not self.preview_image or not self.cap:
-            return
-
-        canvas_w = self.canvas.winfo_width() or 720
+        """Draw the crop box overlay on the canvas."""
         canvas_h = self.canvas.winfo_height() or 405
+        canvas_w = self.canvas.winfo_width() or 720
 
-        video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        # Dark overlay outside crop area
+        if self.crop_y > 0:
+            self.canvas.create_rectangle(0, 0, canvas_w, self.crop_y, fill="#333333", outline="")
+        if self.crop_y + self.crop_h < canvas_h:
+            self.canvas.create_rectangle(0, self.crop_y + self.crop_h, canvas_w, canvas_h, fill="#333333", outline="")
+        if self.crop_x > 0:
+            self.canvas.create_rectangle(0, 0, self.crop_x, canvas_h, fill="#333333", outline="")
+        if self.crop_x + self.crop_w < canvas_w:
+            self.canvas.create_rectangle(self.crop_x + self.crop_w, 0, canvas_w, canvas_h, fill="#333333", outline="")
 
-        # Scale video to canvas
-        scale = min(canvas_w / video_w, canvas_h / video_h)
-        new_w = int(video_w * scale)
-        new_h = int(video_h * scale)
-
-        # Offset where video is drawn on canvas (centered)
-        offset_x = (canvas_w - new_w) // 2
-        offset_y = (canvas_h - new_h) // 2
-
-        # Scale factors: video pixels -> canvas pixels
-        scale_x = new_w / video_w
-        scale_y = new_h / video_h
-
-        # Convert crop box to canvas coordinates
-        box_x = offset_x + int(self.crop_x * scale_x)
-        box_y = offset_y + int(self.crop_y * scale_y)
-        box_w = int(self.crop_width * scale_x)
-        box_h = int(self.crop_height * scale_y)
-
-        # Draw overlay using PIL
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(self.preview_image)
-
-        # Semi-transparent dark overlay outside crop area
-        overlay_color = (40, 40, 40)
-        
-        # Top area (above crop)
-        if box_y > 0:
-            draw.rectangle([0, 0, canvas_w, box_y], fill=overlay_color)
-        
-        # Bottom area (below crop)
-        if box_y + box_h < canvas_h:
-            draw.rectangle([0, box_y + box_h, canvas_w, canvas_h], fill=overlay_color)
-        
-        # Left area (left of crop)
-        if box_x > 0:
-            draw.rectangle([0, 0, box_x, canvas_h], fill=overlay_color)
-        
-        # Right area (right of crop)
-        if box_x + box_w < canvas_w:
-            draw.rectangle([box_x + box_w, 0, canvas_w, canvas_h], fill=overlay_color)
-
-        # Crop box border (bright red, thicker)
-        draw.rectangle(
-            [box_x, box_y, box_x + box_w, box_y + box_h],
-            outline="red",
-            width=4
+        # Crop box border
+        self.canvas.create_rectangle(
+            self.crop_x, self.crop_y,
+            self.crop_x + self.crop_w, self.crop_y + self.crop_h,
+            outline="red", width=4
         )
 
-        # Corner handles (larger, more visible)
-        handle_size = 10
+        # Corner handles
+        hs = 10
         corners = [
-            (box_x, box_y),
-            (box_x + box_w, box_y + box_h),
-            (box_x + box_w, box_y),
-            (box_x, box_y + box_h),
+            (self.crop_x, self.crop_y),
+            (self.crop_x + self.crop_w, self.crop_y + self.crop_h),
+            (self.crop_x + self.crop_w, self.crop_y),
+            (self.crop_x, self.crop_y + self.crop_h),
         ]
         for cx, cy in corners:
-            draw.rectangle(
-                [cx - handle_size, cy - handle_size, cx + handle_size, cy + handle_size],
-                fill="red",
-                outline="white",
-                width=2
+            self.canvas.create_rectangle(
+                cx - hs, cy - hs, cx + hs, cy + hs,
+                fill="red", outline="white", width=2
             )
 
-        # Edge handles (visible circles)
-        edge_centers = [
-            (box_x + box_w // 2, box_y),
-            (box_x + box_w // 2, box_y + box_h),
-            (box_x, box_y + box_h // 2),
-            (box_x + box_w, box_y + box_h // 2),
-        ]
-        for ex, ey in edge_centers:
-            draw.ellipse([ex - 6, ey - 6, ex + 6, ey + 6], fill="white", outline="red", width=2)
-
-    def _on_canvas_click(self, event):
-        """Handle mouse click on canvas to detect crop box interaction."""
-        if not self.cap:
-            return
-
-        x, y = event.x, event.y
-
-        # Get canvas and video dimensions
-        canvas_w = self.canvas.winfo_width() or 720
-        canvas_h = self.canvas.winfo_height() or 405
-
-        if self.cap:
-            video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        else:
-            video_w, video_h = 1920, 1080
-
-        # Scale video to canvas
-        scale = min(canvas_w / video_w, canvas_h / video_h)
-        new_w = int(video_w * scale)
-        new_h = int(video_h * scale)
-
-        # Offset where video is drawn on canvas (centered)
-        offset_x = (canvas_w - new_w) // 2
-        offset_y = (canvas_h - new_h) // 2
-
-        # Scale factors: video pixels -> canvas pixels
-        scale_x = new_w / video_w
-        scale_y = new_h / video_h
-
-        # Convert crop box to canvas coordinates
-        box_x = offset_x + int(self.crop_x * scale_x)
-        box_y = offset_y + int(self.crop_y * scale_y)
-        box_w = int(self.crop_width * scale_x)
-        box_h = int(self.crop_height * scale_y)
-
-        # Check corners first (larger hit area)
-        handle_threshold = 15
-        corners = [
-            ('nw', box_x, box_y),
-            ('se', box_x + box_w, box_y + box_h),
-            ('ne', box_x + box_w, box_y),
-            ('sw', box_x, box_y + box_h),
-        ]
-
-        for edge, ex, ey in corners:
-            if abs(x - ex) < handle_threshold and abs(y - ey) < handle_threshold:
-                self.is_dragging = True
-                self.drag_edge = edge
-                self.drag_start = (x, y)
-                return
-
-        # Check edges
-        edge_threshold = 10
+        # Edge handles
         edges = [
-            ('n', box_x + box_w // 2, box_y),
-            ('s', box_x + box_w // 2, box_y + box_h),
-            ('e', box_x + box_w, box_y + box_h // 2),
-            ('w', box_x, box_y + box_h // 2),
+            (self.crop_x + self.crop_w // 2, self.crop_y),
+            (self.crop_x + self.crop_w // 2, self.crop_y + self.crop_h),
+            (self.crop_x, self.crop_y + self.crop_h // 2),
+            (self.crop_x + self.crop_w, self.crop_y + self.crop_h // 2),
         ]
+        for ex, ey in edges:
+            self.canvas.create_ellipse(
+                ex - 6, ey - 6, ex + 6, ey + 6,
+                fill="white", outline="red", width=2
+            )
 
+    def _get_hit_edge(self, x, y):
+        """Check if click is on a crop handle or inside the box."""
+        hs = 15
+        corners = [
+            ("nw", self.crop_x, self.crop_y),
+            ("se", self.crop_x + self.crop_w, self.crop_y + self.crop_h),
+            ("ne", self.crop_x + self.crop_w, self.crop_y),
+            ("sw", self.crop_x, self.crop_y + self.crop_h),
+        ]
+        for edge, ex, ey in corners:
+            if abs(x - ex) < hs and abs(y - ey) < hs:
+                return edge
+
+        et = 10
+        edges = [
+            ("n", self.crop_x + self.crop_w // 2, self.crop_y),
+            ("s", self.crop_x + self.crop_w // 2, self.crop_y + self.crop_h),
+            ("e", self.crop_x + self.crop_w, self.crop_y + self.crop_h // 2),
+            ("w", self.crop_x, self.crop_y + self.crop_h // 2),
+        ]
         for edge, ex, ey in edges:
-            if edge in ('n', 's'):
-                if abs(x - ex) < edge_threshold * 3 and abs(y - ey) < edge_threshold:
-                    self.is_dragging = True
-                    self.drag_edge = edge
-                    self.drag_start = (x, y)
-                    return
+            if edge in ("n", "s"):
+                if abs(x - ex) < et * 3 and abs(y - ey) < et:
+                    return edge
             else:
-                if abs(x - ex) < edge_threshold and abs(y - ey) < edge_threshold * 3:
-                    self.is_dragging = True
-                    self.drag_edge = edge
-                    self.drag_start = (x, y)
-                    return
+                if abs(x - ex) < et and abs(y - ey) < et * 3:
+                    return edge
 
-        # Check if inside box (for moving)
-        if (box_x <= x <= box_x + box_w and
-                box_y <= y <= box_y + box_h):
+        if (self.crop_x <= x <= self.crop_x + self.crop_w and
+                self.crop_y <= y <= self.crop_y + self.crop_h):
+            return "move"
+
+        return None
+
+    def _on_click(self, event):
+        """Handle mouse click on canvas."""
+        edge = self._get_hit_edge(event.x, event.y)
+        if edge:
             self.is_dragging = True
-            self.drag_edge = 'move'
-            self.drag_start = (x, y)
-            return
+            self.drag_edge = edge
+            self.drag_start = (event.x, event.y)
 
-    def _on_canvas_drag(self, event):
+    def _on_drag(self, event):
         """Handle mouse drag to resize/move crop box."""
         if not self.is_dragging:
             return
@@ -485,505 +372,276 @@ class VideoEditorApp:
         dx = x - self.drag_start[0]
         dy = y - self.drag_start[1]
 
-        if self.cap:
-            video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        else:
-            return
-
         canvas_w = self.canvas.winfo_width() or 720
         canvas_h = self.canvas.winfo_height() or 405
 
-        # Scale: canvas pixels -> video pixels
-        scale = min(canvas_w / video_w, canvas_h / video_h)
-        new_w = int(video_w * scale)
-        new_h = int(video_h * scale)
-        offset_x = (canvas_w - new_w) // 2
-        offset_y = (canvas_h - new_h) // 2
-
-        # Convert canvas delta to video delta
-        scale_x = video_w / new_w
-        scale_y = video_h / new_h
-        video_dx = dx * scale_x
-        video_dy = dy * scale_y
-
-        if self.drag_edge == 'move':
-            # Move box
-            new_x = self.crop_x + video_dx
-            new_y = self.crop_y + video_dy
-            # Clamp
-            self.crop_x = max(0, min(new_x, video_w - self.crop_width))
-            self.crop_y = max(0, min(new_y, video_h - self.crop_height))
-        elif self.drag_edge == 'nw':
-            new_x = self.crop_x + video_dx
-            new_y = self.crop_y + video_dy
-            new_w_crop = self.crop_width - video_dx
-            new_h_crop = self.crop_height - video_dy
-            if new_w_crop > 20:
+        if self.drag_edge == "move":
+            self.crop_x = max(0, min(self.crop_x + dx, canvas_w - self.crop_w))
+            self.crop_y = max(0, min(self.crop_y + dy, canvas_h - self.crop_h))
+        elif self.drag_edge == "nw":
+            new_x = self.crop_x + dx
+            new_y = self.crop_y + dy
+            new_w = self.crop_w - dx
+            new_h = self.crop_h - dy
+            if new_w > 30:
                 self.crop_x = new_x
-                self.crop_width = new_w_crop
-            if new_h_crop > 20:
+                self.crop_w = new_w
+            if new_h > 30:
                 self.crop_y = new_y
-                self.crop_height = new_h_crop
-        elif self.drag_edge == 'se':
-            new_w_crop = self.crop_width + video_dx
-            new_h_crop = self.crop_height + video_dy
-            if self.crop_x + new_w_crop <= video_w and new_w_crop > 20:
-                self.crop_width = new_w_crop
-            if self.crop_y + new_h_crop <= video_h and new_h_crop > 20:
-                self.crop_height = new_h_crop
-        elif self.drag_edge == 'ne':
-            new_y = self.crop_y + video_dy
-            new_h_crop = self.crop_height - video_dy
-            new_w_crop = self.crop_width + video_dx
-            if new_h_crop > 20:
+                self.crop_h = new_h
+        elif self.drag_edge == "se":
+            new_w = self.crop_w + dx
+            new_h = self.crop_h + dy
+            if self.crop_x + new_w <= canvas_w and new_w > 30:
+                self.crop_w = new_w
+            if self.crop_y + new_h <= canvas_h and new_h > 30:
+                self.crop_h = new_h
+        elif self.drag_edge == "ne":
+            new_y = self.crop_y + dy
+            new_h = self.crop_h - dy
+            new_w = self.crop_w + dx
+            if new_h > 30:
                 self.crop_y = new_y
-                self.crop_height = new_h_crop
-            if self.crop_x + new_w_crop <= video_w and new_w_crop > 20:
-                self.crop_width = new_w_crop
-        elif self.drag_edge == 'sw':
-            new_x = self.crop_x + video_dx
-            new_w_crop = self.crop_width - video_dx
-            new_h_crop = self.crop_height + video_dy
-            if new_w_crop > 20:
+                self.crop_h = new_h
+            if self.crop_x + new_w <= canvas_w and new_w > 30:
+                self.crop_w = new_w
+        elif self.drag_edge == "sw":
+            new_x = self.crop_x + dx
+            new_w = self.crop_w - dx
+            new_h = self.crop_h + dy
+            if new_w > 30:
                 self.crop_x = new_x
-                self.crop_width = new_w_crop
-            if self.crop_y + new_h_crop <= video_h and new_h_crop > 20:
-                self.crop_height = new_h_crop
-        elif self.drag_edge == 'n':
-            new_y = self.crop_y + video_dy
-            new_h_crop = self.crop_height - video_dy
-            if new_h_crop > 20:
+                self.crop_w = new_w
+            if self.crop_y + new_h <= canvas_h and new_h > 30:
+                self.crop_h = new_h
+        elif self.drag_edge == "n":
+            new_y = self.crop_y + dy
+            new_h = self.crop_h - dy
+            if new_h > 30:
                 self.crop_y = new_y
-                self.crop_height = new_h_crop
-        elif self.drag_edge == 's':
-            new_h_crop = self.crop_height + video_dy
-            if self.crop_y + new_h_crop <= video_h and new_h_crop > 20:
-                self.crop_height = new_h_crop
-        elif self.drag_edge == 'e':
-            new_w_crop = self.crop_width + video_dx
-            if self.crop_x + new_w_crop <= video_w and new_w_crop > 20:
-                self.crop_width = new_w_crop
-        elif self.drag_edge == 'w':
-            new_x = self.crop_x + video_dx
-            new_w_crop = self.crop_width - video_dx
-            if new_w_crop > 20:
+                self.crop_h = new_h
+        elif self.drag_edge == "s":
+            new_h = self.crop_h + dy
+            if self.crop_y + new_h <= canvas_h and new_h > 30:
+                self.crop_h = new_h
+        elif self.drag_edge == "e":
+            new_w = self.crop_w + dx
+            if self.crop_x + new_w <= canvas_w and new_w > 30:
+                self.crop_w = new_w
+        elif self.drag_edge == "w":
+            new_x = self.crop_x + dx
+            new_w = self.crop_w - dx
+            if new_w > 30:
                 self.crop_x = new_x
-                self.crop_width = new_w_crop
+                self.crop_w = new_w
 
         self.drag_start = (x, y)
-        self._update_crop_info()
-        self._redraw_canvas()
+        self._update_crop_label()
+        self._redraw()
 
-    def _on_canvas_release(self, event):
+    def _on_release(self, event):
         """Handle mouse release."""
         self.is_dragging = False
         self.drag_edge = None
 
-    def _update_crop_info(self):
-        """Update the crop info label."""
-        self.crop_info_label.config(
-            text=f"X: {self.crop_x}, Y: {self.crop_y}\n"
-                 f"Width: {self.crop_width}, Height: {self.crop_height}"
-        )
+    def _on_start(self, value):
+        self.start_time = float(value)
+        self.start_label.config(text=f"{self.start_time:.2f}s")
+        if self.start_time >= self.end_time:
+            self.start_time = max(0, self.end_time - 0.1)
+            self.start_scale.set(self.start_time)
+            self.start_label.config(text=f"{self.start_time:.2f}s")
 
-    def _reset_crop(self):
-        """Reset crop to full video."""
-        if not self.cap:
-            return
-        video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.crop_x = 0
-        self.crop_y = 0
-        self.crop_width = video_w
-        self.crop_height = video_h
-        self._update_crop_info()
-        self._redraw_canvas()
-
-    def _fit_crop(self):
-        """Fit crop box to video dimensions."""
-        self._reset_crop()
-
-    def _redraw_canvas(self):
-        """Redraw the canvas with current frame and crop box."""
-        if not self.cap:
-            return
-
-        # Get current frame
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
-        ret, frame = self.cap.read()
-
-        if not ret:
-            return
-
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        canvas_width = self.canvas.winfo_width() or 720
-        canvas_height = self.canvas.winfo_height() or 405
-
-        h, w = frame.shape[:2]
-        scale = min(canvas_width / w, canvas_height / h)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-
-        frame_resized = cv2.resize(frame, (new_w, new_h))
-        self.preview_image = Image.fromarray(frame_resized)
-
-        # Calculate crop box in canvas coordinates
-        canvas_w = canvas_width
-        canvas_h = canvas_height
-
-        # Scale factors: video pixels -> canvas pixels
-        scale_x = new_w / w
-        scale_y = new_h / h
-
-        # Crop box position in canvas coords (centered)
-        offset_x = (canvas_w - new_w) // 2
-        offset_y = (canvas_h - new_h) // 2
-
-        box_x = offset_x + int(self.crop_x * scale_x)
-        box_y = offset_y + int(self.crop_y * scale_y)
-        box_w = int(self.crop_width * scale_x)
-        box_h = int(self.crop_height * scale_y)
-
-        # Draw crop box overlay using PIL
-        from PIL import ImageDraw
-        draw = ImageDraw.Draw(self.preview_image)
-
-        # Semi-transparent dark overlay outside crop area (40% opacity)
-        overlay_color = (40, 40, 40, 180)
-        
-        # Top area (above crop)
-        if box_y > 0:
-            draw.rectangle([0, 0, canvas_w, box_y], fill=overlay_color)
-        
-        # Bottom area (below crop)
-        if box_y + box_h < canvas_h:
-            draw.rectangle([0, box_y + box_h, canvas_w, canvas_h], fill=overlay_color)
-        
-        # Left area (left of crop)
-        if box_x > 0:
-            draw.rectangle([0, 0, box_x, canvas_h], fill=overlay_color)
-        
-        # Right area (right of crop)
-        if box_x + box_w < canvas_w:
-            draw.rectangle([box_x + box_w, 0, canvas_w, canvas_h], fill=overlay_color)
-
-        # Crop box border (bright red, thicker)
-        draw.rectangle(
-            [box_x, box_y, box_x + box_w, box_y + box_h],
-            outline="red",
-            width=4
-        )
-
-        # Corner handles (larger, more visible)
-        handle_size = 10
-        corners = [
-            (box_x, box_y),
-            (box_x + box_w, box_y + box_h),
-            (box_x + box_w, box_y),
-            (box_x, box_y + box_h),
-        ]
-        for cx, cy in corners:
-            draw.rectangle(
-                [cx - handle_size, cy - handle_size, cx + handle_size, cy + handle_size],
-                fill="red",
-                outline="white",
-                width=2
-            )
-
-        # Edge handles (visible circles)
-        edge_centers = [
-            (box_x + box_w // 2, box_y),
-            (box_x + box_w // 2, box_y + box_h),
-            (box_x, box_y + box_h // 2),
-            (box_x + box_w, box_y + box_h // 2),
-        ]
-        for ex, ey in edge_centers:
-            draw.ellipse([ex - 6, ey - 6, ex + 6, ey + 6], fill="white", outline="red", width=2)
-
-        self.video_image = ImageTk.PhotoImage(self.preview_image)
-
-        # Clear and redraw
-        self.canvas.delete("all")
-        self.canvas.create_image(
-            canvas_width // 2,
-            canvas_height // 2,
-            image=self.video_image,
-            anchor=tk.CENTER
-        )
-
-    def _on_start_slider(self, value):
-        """Handle start slider change."""
-        self.start_slider = float(value)
-        self.start_value_label.config(text=f"{self.start_slider:.2f}s")
-
-        # Ensure start is before end
-        if self.start_slider >= self.end_slider:
-            self.start_slider = self.end_slider - 0.1
-            if self.start_slider < 0:
-                self.start_slider = 0
-            self.start_scale.set(self.start_slider)
-            self.start_value_label.config(text=f"{self.start_slider:.2f}s")
-
-    def _on_end_slider(self, value):
-        """Handle end slider change."""
-        self.end_slider = float(value)
-        self.end_value_label.config(text=f"{self.end_slider:.2f}s")
-
-        # Ensure end is after start
-        if self.end_slider <= self.start_slider:
-            self.end_slider = self.start_slider + 0.1
-            if self.end_slider > self.duration:
-                self.end_slider = self.duration
-            self.end_scale.set(self.end_slider)
-            self.end_value_label.config(text=f"{self.end_slider:.2f}s")
+    def _on_end(self, value):
+        self.end_time = float(value)
+        self.end_label.config(text=f"{self.end_time:.2f}s")
+        if self.end_time <= self.start_time:
+            self.end_time = min(self.duration, self.start_time + 0.1)
+            self.end_scale.set(self.end_time)
+            self.end_label.config(text=f"{self.end_time:.2f}s")
 
     def _toggle_play(self):
-        """Toggle play/pause."""
         if not self.cap:
             messagebox.showwarning("Warning", "Please upload a video first.")
             return
-
         if self.is_playing:
             self._pause()
         else:
             self._play()
 
     def _play(self):
-        """Start playback."""
         if not self.cap:
             return
-
         self.is_playing = True
-        self.play_btn.config(text="⏸ Pause")
-
-        # Start playback thread
-        self.playback_thread = threading.Thread(target=self._playback_loop, daemon=True)
-        self.playback_thread.start()
+        self.play_btn.config(text="Pause")
+        threading.Thread(target=self._playback_loop, daemon=True).start()
 
     def _pause(self):
-        """Pause playback."""
         self.is_playing = False
-        self.play_btn.config(text="▶ Play")
+        self.play_btn.config(text="Play")
 
     def _stop(self):
-        """Stop playback and reset to beginning."""
         self.is_playing = False
         self.current_frame = 0
-        self.play_btn.config(text="▶ Play")
-        self._update_preview()
+        self.play_btn.config(text="Play")
         self.frame_entry.delete(0, tk.END)
         self.frame_entry.insert(0, "0")
+        self._redraw()
 
     def _playback_loop(self):
-        """Playback loop running in a separate thread."""
         if not self.cap:
             return
-
         while self.is_playing:
-            # Check if we've reached the end of the selection
             current_time = self.current_frame / self.fps
-            if current_time >= self.end_slider:
+            if current_time >= self.end_time:
                 self.is_playing = False
-                self.play_btn.config(text="▶ Play")
+                self.play_btn.config(text="Play")
                 break
-
-            # Check if we're before the start (shouldn't happen normally)
-            if current_time < self.start_slider and self.current_frame > 0:
-                # Continue playing through the timeline
-                pass
-
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
             ret, frame = self.cap.read()
-
             if not ret:
                 break
-
-            # Update UI in main thread
-            self.root.after(0, self._update_ui_frame)
+            self.root.after(0, self._update_frame)
             self.current_frame += 1
-
-            # Sleep to match FPS
             time.sleep(1.0 / self.fps)
+        self.root.after(0, self._redraw)
 
-        # Ensure final frame is shown
-        self.root.after(0, self._update_preview)
-
-    def _update_ui_frame(self):
-        """Update UI with current frame (called from main thread)."""
-        frame_time = self.current_frame / self.fps
+    def _update_frame(self):
         self.frame_entry.delete(0, tk.END)
         self.frame_entry.insert(0, str(self.current_frame))
-        self._redraw_canvas()
+        self._redraw()
 
     def _on_frame_change(self, event):
-        """Handle frame entry change."""
         if not self.cap:
             return
-
         try:
             frame_num = int(self.frame_entry.get())
             if 0 <= frame_num < self.total_frames:
                 self.current_frame = frame_num
-                self._update_preview()
+                self._redraw()
         except ValueError:
             pass
 
     def _export_video(self):
-        """Export the selected portion of the video with crop box."""
         if not self.video_path:
             messagebox.showwarning("Warning", "Please upload a video first.")
             return
 
-        if self.is_exporting:
-            messagebox.showinfo("Info", "Export is already in progress.")
-            return
-
-        # Get output file path
         output_path = filedialog.asksaveasfilename(
             title="Save Video",
             defaultextension=".mp4",
             filetypes=[("MP4 files", "*.mp4"), ("All files", "*.*")],
             initialfile=os.path.splitext(os.path.basename(self.video_path))[0] + "_edited.mp4"
         )
-
         if not output_path:
             return
 
-        # Start export in a thread
-        self.is_exporting = True
+        video_x, video_y, video_w, video_h = self._canvas_to_video_crop()
+
         self.export_btn.config(state=tk.DISABLED)
         self.progress.config(value=0)
         self.status_label.config(text="Exporting...")
 
-        export_thread = threading.Thread(
-            target=self._export_thread,
-            args=(output_path,),
+        threading.Thread(
+            target=self._do_export,
+            args=(output_path, video_x, video_y, video_w, video_h),
             daemon=True
-        )
-        export_thread.start()
+        ).start()
 
-    def _export_thread(self, output_path):
-        """Export video in a separate thread."""
+    def _canvas_to_video_crop(self):
+        """Convert canvas crop coordinates to video coordinates."""
+        canvas_w = self.canvas.winfo_width() or 720
+        canvas_h = self.canvas.winfo_height() or 405
+
+        scale_x = self.video_display_w / self.video_orig_w
+        scale_y = self.video_display_h / self.video_orig_h
+
+        rel_x = self.crop_x - self.video_display_x
+        rel_y = self.crop_y - self.video_display_y
+
+        video_x = int(rel_x / scale_x)
+        video_y = int(rel_y / scale_y)
+        video_w = int(self.crop_w / scale_x)
+        video_h = int(self.crop_h / scale_y)
+
+        video_x = max(0, min(video_x, self.video_orig_w))
+        video_y = max(0, min(video_y, self.video_orig_h))
+        video_w = max(1, min(video_w, self.video_orig_w - video_x))
+        video_h = max(1, min(video_h, self.video_orig_h - video_y))
+
+        return video_x, video_y, video_w, video_h
+
+    def _do_export(self, output_path, crop_x, crop_y, crop_w, crop_h):
         try:
-            import subprocess
-
-            start_time = self.start_slider
-            end_time = self.end_slider
-            duration = end_time - start_time
-
+            duration = self.end_time - self.start_time
             if duration <= 0:
-                self.root.after(0, lambda: messagebox.showerror(
-                    "Error", "Invalid timeline selection."
-                ))
+                self.root.after(0, lambda: messagebox.showerror("Error", "Invalid timeline selection."))
                 return
 
-            # Input options
-            input_args = [
-                "-y",  # overwrite output
-                "-ss", str(start_time),  # start time
-                "-i", self.video_path,  # input file
-                "-to", str(duration),  # duration
-            ]
-
-            # Crop filter
-            crop_filter = (
-                f"crop={self.crop_width}:{self.crop_height}:"
-                f"{self.crop_x}:{self.crop_y}"
-            )
-
-            # Output args
-            output_args = [
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(self.start_time),
+                "-i", self.video_path,
+                "-t", str(duration),
+                "-vf", f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y}",
                 "-c:v", "libx264",
                 "-preset", "medium",
-                "-crf", "18",  # High quality (low CRF = high quality)
+                "-crf", "18",
                 "-pix_fmt", "yuv420p",
-                "-an",  # No audio
+                "-an",
                 "-movflags", "+faststart",
-                "-vf", crop_filter,
                 output_path
             ]
 
-            cmd = ["ffmpeg"] + input_args + output_args
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
-            # Show progress
-            self.root.after(0, lambda: self.status_label.config(text="Starting export..."))
-
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-
-            # Monitor progress
             while True:
                 line = process.stderr.readline()
                 if not line and process.poll() is not None:
                     break
-
-                # Try to parse progress
                 if "time=" in line:
                     time_str = line.split("time=")[-1].split(" ")[0].strip()
                     try:
                         parts = time_str.split(":")
-                        current_sec = (
-                            int(parts[0]) * 3600 +
-                            int(parts[1]) * 60 +
-                            float(parts[2])
-                        )
-                        progress = min(int((current_sec / duration) * 100), 100)
-                        self.root.after(0, lambda p=progress: self.progress.config(value=p))
-                        self.root.after(0, lambda p=progress: self.status_label.config(text=f"Exporting... {p}%"))
+                        current_sec = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+                        pct = min(int((current_sec / duration) * 100), 100)
+                        self.root.after(0, lambda p=pct: self._update_progress(p))
                     except (ValueError, IndexError):
                         pass
 
             process.wait()
 
             if process.returncode == 0:
-                self.root.after(0, lambda: self._export_complete(output_path))
+                self.root.after(0, lambda: self._export_done(output_path))
             else:
-                self.root.after(0, lambda: self._export_failed("FFmpeg error occurred"))
+                self.root.after(0, lambda: messagebox.showerror(
+                    "Export Failed", "FFmpeg error.\\n\\nMake sure FFmpeg is installed."
+                ))
 
         except Exception as e:
-            self.root.after(0, lambda: self._export_failed(str(e)))
+            self.root.after(0, lambda: messagebox.showerror("Export Failed", str(e)))
 
-    def _export_complete(self, output_path):
-        """Handle successful export."""
-        self.is_exporting = False
+    def _update_progress(self, pct):
+        self.progress.config(value=pct)
+        self.status_label.config(text=f"Exporting... {pct}%")
+
+    def _export_done(self, path):
         self.export_btn.config(state=tk.NORMAL)
         self.progress.config(value=100)
         self.status_label.config(text="Export complete!")
-        self.status_bar.config(text=f"Exported to: {output_path}")
-        messagebox.showinfo("Success", f"Video exported successfully!\n\nSaved to:\n{output_path}")
-
-    def _export_failed(self, error_msg):
-        """Handle export failure."""
-        self.is_exporting = False
-        self.export_btn.config(state=tk.NORMAL)
-        self.progress.config(value=0)
-        self.status_label.config(text="Export failed")
-        self.status_bar.config(text="Export failed")
-        messagebox.showerror("Export Failed", f"Failed to export video:\n{error_msg}\n\nMake sure FFmpeg is installed and in your PATH.")
+        self.status_bar.config(text=f"Exported to: {path}")
+        messagebox.showinfo("Success", f"Video exported!\\n\\n{path}")
 
     def _cleanup(self):
-        """Clean up resources."""
         if self.cap:
             self.cap.release()
         self.root.destroy()
 
 
 def main():
-    """Main entry point."""
     root = tk.Tk()
     app = VideoEditorApp(root)
-
-    # Handle window close
-    def on_closing():
-        app._cleanup()
-
-    root.protocol("WM_DELETE_WINDOW", on_closing)
+    root.protocol("WM_DELETE_WINDOW", app._cleanup)
     root.mainloop()
 
 
