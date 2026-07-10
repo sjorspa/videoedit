@@ -38,6 +38,20 @@ class VideoEditorApp:
         # Timeline selection
         self.start_time = 0.0
         self.end_time = 0.0
+        self.fixed_duration = False
+        self.fixed_duration_frames = 81  # default 81 frames
+
+        # Crop box presets
+        self.crop_presets = [
+            ("256x256", 256, 256),
+            ("512x512", 512, 512),
+            ("640x480", 640, 480),
+            ("1280x720", 1280, 720),
+            ("1920x1080", 1920, 1080),
+            ("16:9", 16, 9),
+            ("4:3", 4, 3),
+            ("1:1", 1, 1),
+        ]
 
         # Crop box in CANVAS pixels (direct mouse interaction)
         self.crop_x = 0
@@ -115,6 +129,22 @@ class VideoEditorApp:
         self.frame_scale_label = ttk.Label(scrub_frame, text="0.0s / 0.0s", font=("", 8))
         self.frame_scale_label.pack(side=tk.RIGHT, padx=5)
 
+        # Fixed duration option
+        fixed_frame = ttk.Frame(timeline_frame)
+        fixed_frame.pack(fill=tk.X, pady=(5, 0))
+        self.fixed_duration_var = tk.BooleanVar(value=False)
+        self.fixed_duration_cb = ttk.Checkbutton(
+            fixed_frame,
+            text="Fixed duration (81 frames)",
+            variable=self.fixed_duration_var,
+            command=self._on_fixed_duration_toggle
+        )
+        self.fixed_duration_cb.pack(side=tk.LEFT, padx=5)
+        ttk.Label(fixed_frame, text="Frames:", font=("", 8)).pack(side=tk.LEFT, padx=(10, 2))
+        self.fixed_duration_spin = ttk.Spinbox(fixed_frame, from_=1, to=9999, width=6, command=self._on_fixed_duration_change)
+        self.fixed_duration_spin.set(81)
+        self.fixed_duration_spin.pack(side=tk.LEFT, padx=2)
+
         # Right panel - Controls
         right_panel = ttk.Frame(main_frame)
         right_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(5, 0))
@@ -153,6 +183,21 @@ class VideoEditorApp:
         self.crop_label.pack(pady=5)
         ttk.Button(crop_frame, text="Reset Crop", command=self._reset_crop).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(crop_frame, text="Fit to Video", command=self._fit_crop).pack(fill=tk.X, padx=5, pady=2)
+
+        # Crop presets
+        preset_frame = ttk.Frame(crop_frame)
+        preset_frame.pack(fill=tk.X, pady=(5, 0))
+        ttk.Label(preset_frame, text="Size:", font=("", 8)).pack(side=tk.LEFT, padx=5)
+        self.crop_preset_var = tk.StringVar(value="Custom")
+        self.crop_preset_menu = ttk.Combobox(
+            preset_frame,
+            textvariable=self.crop_preset_var,
+            values=[p[0] for p in self.crop_presets],
+            state="readonly",
+            width=10
+        )
+        self.crop_preset_menu.pack(side=tk.LEFT, padx=5)
+        self.crop_preset_menu.bind("<<ComboboxSelected>>", self._on_crop_preset_select)
 
         # Export
         export_frame = ttk.LabelFrame(right_panel, text="Export")
@@ -362,8 +407,13 @@ class VideoEditorApp:
                 self.is_dragging_timeline = True
                 self.dragging_timeline = 'end'
 
+    def _on_timeline_release(self, event):
+        """Handle release on timeline."""
+        self.is_dragging_timeline = False
+        self.dragging_timeline = None
+
     def _on_timeline_drag(self, event):
-        """Handle drag on timeline."""
+        """Handle drag on timeline - also update end time if fixed duration."""
         if not hasattr(self, 'is_dragging_timeline') or not self.is_dragging_timeline:
             return
 
@@ -377,6 +427,13 @@ class VideoEditorApp:
             self.start_time = new_time
             if self.start_time >= self.end_time:
                 self.start_time = max(0, self.end_time - 0.1)
+            # If fixed duration, move end time too
+            if self.fixed_duration and self.cap:
+                self.end_time = self.start_time + (self.fixed_duration_frames / self.fps)
+                if self.end_time > self.duration:
+                    self.end_time = self.duration
+                    self.start_time = self.end_time - (self.fixed_duration_frames / self.fps)
+                    self.start_time = max(0, self.start_time)
         elif self.dragging_timeline == 'end':
             self.end_time = new_time
             if self.end_time <= self.start_time:
@@ -384,10 +441,57 @@ class VideoEditorApp:
 
         self._draw_timeline()
 
-    def _on_timeline_release(self, event):
-        """Handle release on timeline."""
-        self.is_dragging_timeline = False
-        self.dragging_timeline = None
+    def _on_fixed_duration_toggle(self):
+        """Handle fixed duration checkbox toggle."""
+        self.fixed_duration = self.fixed_duration_var.get()
+        if self.fixed_duration and self.cap:
+            self.end_time = self.start_time + (self.fixed_duration_frames / self.fps)
+            if self.end_time > self.duration:
+                self.end_time = self.duration
+                self.start_time = max(0, self.end_time - (self.fixed_duration_frames / self.fps))
+        self._draw_timeline()
+
+    def _on_fixed_duration_change(self):
+        """Handle fixed duration spinbox change."""
+        try:
+            self.fixed_duration_frames = int(self.fixed_duration_spin.get())
+            if self.fixed_duration and self.cap:
+                self.end_time = self.start_time + (self.fixed_duration_frames / self.fps)
+                if self.end_time > self.duration:
+                    self.end_time = self.duration
+                    self.start_time = max(0, self.end_time - (self.fixed_duration_frames / self.fps))
+                self._draw_timeline()
+        except ValueError:
+            pass
+
+    def _on_crop_preset_select(self, event):
+        """Handle crop preset selection."""
+        preset_name = self.crop_preset_var.get()
+        if preset_name == "Custom":
+            return
+        for preset in self.crop_presets:
+            if preset[0] == preset_name:
+                preset_w, preset_h = preset[1], preset[2]
+                # Apply aspect ratio or fixed size
+                if self.video_display_w > 0 and self.video_display_h > 0:
+                    if preset_name in ("16:9", "4:3", "1:1"):
+                        ratio = preset_w / preset_h
+                        # Fit to video display area
+                        if self.video_display_w / self.video_display_h > ratio:
+                            self.crop_h = min(preset_h * 10, self.video_display_h)
+                            self.crop_w = int(self.crop_h * ratio)
+                        else:
+                            self.crop_w = min(preset_w * 10, self.video_display_w)
+                            self.crop_h = int(self.crop_w / ratio)
+                    else:
+                        self.crop_w = min(preset_w, self.video_display_w)
+                        self.crop_h = min(preset_h, self.video_display_h)
+                    # Center the box
+                    self.crop_x = max(0, (self.video_display_w - self.crop_w) // 2)
+                    self.crop_y = max(0, (self.video_display_h - self.crop_h) // 2)
+                    self._update_crop_label()
+                    self._redraw()
+                break
 
     def _update_playhead(self):
         """Update playhead position on timeline."""
