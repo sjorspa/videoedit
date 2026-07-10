@@ -767,6 +767,13 @@ class VideoEditorApp:
         """Play video using root.after() instead of background thread."""
         if not self.cap or not self.is_playing:
             return
+        
+        # Skip frames to maintain real-time speed
+        target_frame = int(self.current_frame + self.fps * (33 / 1000))
+        if target_frame > self.current_frame + 1:
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+            self.current_frame = target_frame
+        
         ret, frame = self.cap.read()
         if not ret:
             # Video ended
@@ -776,7 +783,7 @@ class VideoEditorApp:
             return
         self.current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
         self._update_frame()
-        self.root.after(int(1000 / self.fps), self._playback_loop)
+        self.root.after(33, self._playback_loop)  # ~30fps display cap
 
     def _update_frame(self):
         self.frame_entry.delete(0, tk.END)
