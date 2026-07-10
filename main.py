@@ -261,20 +261,11 @@ class VideoEditorApp:
                 return
 
             self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30
+            self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.duration = self.total_frames / self.fps
+
             self.video_orig_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.video_orig_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-            # Count frames by iterating (CAP_PROP_FRAME_COUNT is unreliable)
-            self.total_frames = 0
-            temp_pos = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
-            while True:
-                ret, _ = self.cap.read()
-                if not ret:
-                    break
-                self.total_frames += 1
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, temp_pos)  # Reset to start
-            
-            self.duration = self.total_frames / self.fps
 
             self.start_time = 0.0
             self.end_time = self.duration
@@ -776,13 +767,10 @@ class VideoEditorApp:
         if not self.cap:
             return
         while self.is_playing:
-            current_time = self.current_frame / self.fps
-            if current_time >= self.end_time:
-                self.root.after(0, self._pause)
-                break
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
             ret, frame = self.cap.read()
             if not ret:
+                # Video ended
                 self.root.after(0, self._pause)
                 break
             self.root.after(0, self._update_frame)
