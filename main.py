@@ -38,13 +38,20 @@ class VideoEditorApp:
         # Selection state
         self.start_slider = 0.0  # seconds
         self.end_slider = 0.0  # seconds
-        self.crop_x = 0
-        self.crop_y = 0
-        self.crop_width = 0
-        self.crop_height = 0
+        
+        # Crop box stored in CANVAS coordinates (for direct mouse interaction)
+        self.canvas_crop_x = 0
+        self.canvas_crop_y = 0
+        self.canvas_crop_w = 0
+        self.canvas_crop_h = 0
+        
+        # Video dimensions for export conversion
+        self.video_w = 0
+        self.video_h = 0
+        
         self.is_dragging = False
         self.drag_start = None
-        self.drag_edge = None  # 'nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w'
+        self.drag_edge = None  # 'nw', 'ne', 'sw', 'se', 'n', 's', 'e', 'w', 'move'
 
         # UI state
         self.video_image = None  # Keep reference to prevent garbage collection
@@ -244,7 +251,11 @@ class VideoEditorApp:
             self.total_frames_label.config(text=str(self.total_frames))
             self.info_label.config(text=f"{self.fps:.1f} FPS | {self.total_frames} frames | {self.duration:.1f}s")
 
-            # Reset crop to full video
+            # Store video dimensions for export
+            self.video_w = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.video_h = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            # Reset crop to full video (in canvas coords)
             self._fit_crop()
 
             # Load first frame for preview
