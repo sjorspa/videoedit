@@ -85,21 +85,26 @@ class VideoEditorApp:
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Configure>", self._on_canvas_resize)
 
-        # Timeline selection (under video)
-        timeline_frame = ttk.LabelFrame(left_panel, text="Timeline Selection")
+        # Timeline selection (visual timeline under video)
+        timeline_frame = ttk.Frame(left_panel)
         timeline_frame.pack(fill=tk.X, padx=5, pady=(5, 5))
+        ttk.Label(timeline_frame, text="Timeline Selection", font=("", 9, "bold")).pack(anchor=tk.W)
 
-        ttk.Label(timeline_frame, text="Start (s):").pack(anchor=tk.W, padx=5, pady=(5, 0))
-        self.start_scale = ttk.Scale(timeline_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_start)
-        self.start_scale.pack(fill=tk.X, padx=5, pady=2)
-        self.start_label = ttk.Label(timeline_frame, text="0.0s")
-        self.start_label.pack(anchor=tk.W, padx=5)
+        self.timeline_canvas = tk.Canvas(timeline_frame, height=60, bg="#1a1a2e", cursor="hand2")
+        self.timeline_canvas.pack(fill=tk.X, padx=5, pady=5)
+        self.timeline_canvas.bind("<Button-1>", self._on_timeline_click)
+        self.timeline_canvas.bind("<B1-Motion>", self._on_timeline_drag)
+        self.timeline_canvas.bind("<ButtonRelease-1>", self._on_timeline_release)
 
-        ttk.Label(timeline_frame, text="End (s):").pack(anchor=tk.W, padx=5, pady=(5, 0))
-        self.end_scale = ttk.Scale(timeline_frame, from_=0, to=100, orient=tk.HORIZONTAL, command=self._on_end)
-        self.end_scale.pack(fill=tk.X, padx=5, pady=2)
-        self.end_label = ttk.Label(timeline_frame, text="0.0s")
-        self.end_label.pack(anchor=tk.W, padx=5)
+        # Timeline info labels
+        info_frame = ttk.Frame(timeline_frame)
+        info_frame.pack(fill=tk.X)
+        self.timeline_start_label = ttk.Label(info_frame, text="Start: 0.0s", font=("", 8))
+        self.timeline_start_label.pack(side=tk.LEFT, padx=5)
+        self.timeline_duration_label = ttk.Label(info_frame, text="Duration: 0.0s", font=("", 8))
+        self.timeline_duration_label.pack(side=tk.LEFT, padx=5)
+        self.timeline_end_label = ttk.Label(info_frame, text="End: 0.0s", font=("", 8))
+        self.timeline_end_label.pack(side=tk.RIGHT, padx=5)
 
         # Right panel - Controls
         right_panel = ttk.Frame(main_frame)
@@ -222,6 +227,9 @@ class VideoEditorApp:
             self.current_frame = 0
             self._redraw()
 
+            # Initialize timeline
+            self._draw_timeline()
+
             self.status_bar.config(text=f"Loaded: {os.path.basename(self.video_path)}")
 
         except Exception as e:
@@ -250,6 +258,136 @@ class VideoEditorApp:
     def _update_crop_label(self):
         """Update crop info label."""
         self.crop_label.config(text=f"X={self.crop_x} Y={self.crop_y} W={self.crop_w} H={self.crop_h}")
+
+    def _draw_timeline(self):
+        """Draw the visual timeline."""
+        if not self.cap or not hasattr(self, 'timeline_canvas'):
+            return
+
+        self.timeline_canvas.delete("all")
+        tw = self.timeline_canvas.winfo_width() or 700
+        th = 60
+
+        if tw <= 1:
+            return
+
+        # Draw video bar (full duration)
+        margin = 5
+        bar_h = 20
+        bar_y = 10
+        self.timeline_canvas.create_rectangle(
+            margin, bar_y, tw - margin, bar_y + bar_h,
+            fill="#3a3a5c", outline="white", width=1
+        )
+
+        # Draw selected region
+        start_x = margin + (self.start_time / self.duration) * (tw - 2 * margin)
+        end_x = margin + (self.end_time / self.duration) * (tw - 2 * margin)
+
+        self.timeline_canvas.create_rectangle(
+            start_x, bar_y, end_x, bar_y + bar_h,
+            fill="#4a90d9", outline="red", width=2
+        )
+
+        # Draw start marker
+        self.start_marker = self.timeline_canvas.create_line(
+            start_x, bar_y, start_x, bar_y + bar_h + 10,
+            fill="red", width=3
+        )
+
+        # Draw end marker
+        self.end_marker = self.timeline_canvas.create_line(
+            end_x, bar_y, end_x, bar_y + bar_h + 10,
+            fill="red", width=3
+        )
+
+        # Draw playhead
+        play_x = margin + (self.current_frame / self.total_frames) * (tw - 2 * margin)
+        self.playhead = self.timeline_canvas.create_line(
+            play_x, 0, play_x, th,
+            fill="yellow", width=2, dash=(4, 2)
+        )
+
+        # Time labels
+        self.timeline_start_label.config(text=f"Start: {self.start_time:.2f}s")
+        self.timeline_end_label.config(text=f"End: {self.end_time:.2f}s")
+        self.timeline_duration_label.config(text=f"Duration: {self.end_time - self.start_time:.2f}s")
+
+    def _on_timeline_click(self, event):
+        """Handle click on timeline."""
+        if not self.cap:
+            return
+
+        tw = self.timeline_canvas.winfo_width()
+        margin = 5
+        bar_y = 10
+        bar_h = 20
+
+        # Check if click is on start marker
+        start_x = margin + (self.start_time / self.duration) * (tw - 2 * margin)
+        if abs(event.x - start_x) < 10:
+            self.is_dragging_timeline = True
+            self.dragging_timeline = 'start'
+            return
+
+        # Check if click is on end marker
+        end_x = margin + (self.end_time / self.duration) * (tw - 2 * margin)
+        if abs(event.x - end_x) < 10:
+            self.is_dragging_timeline = True
+            self.dragging_timeline = 'end'
+            return
+
+        # Click on bar - jump playhead
+        if bar_y <= event.y <= bar_y + bar_h:
+            frac = (event.x - margin) / (tw - 2 * margin)
+            frac = max(0, min(1, frac))
+            self.current_frame = int(frac * self.total_frames)
+            self._redraw()
+            self._update_playhead()
+        else:
+            # Determine if closer to start or end
+            if abs(event.x - start_x) < abs(event.x - end_x):
+                self.is_dragging_timeline = True
+                self.dragging_timeline = 'start'
+            else:
+                self.is_dragging_timeline = True
+                self.dragging_timeline = 'end'
+
+    def _on_timeline_drag(self, event):
+        """Handle drag on timeline."""
+        if not hasattr(self, 'is_dragging_timeline') or not self.is_dragging_timeline:
+            return
+
+        tw = self.timeline_canvas.winfo_width()
+        margin = 5
+        frac = (event.x - margin) / (tw - 2 * margin)
+        frac = max(0, min(1, frac))
+        new_time = frac * self.duration
+
+        if self.dragging_timeline == 'start':
+            self.start_time = new_time
+            if self.start_time >= self.end_time:
+                self.start_time = max(0, self.end_time - 0.1)
+        elif self.dragging_timeline == 'end':
+            self.end_time = new_time
+            if self.end_time <= self.start_time:
+                self.end_time = min(self.duration, self.start_time + 0.1)
+
+        self._draw_timeline()
+
+    def _on_timeline_release(self, event):
+        """Handle release on timeline."""
+        self.is_dragging_timeline = False
+        self.dragging_timeline = None
+
+    def _update_playhead(self):
+        """Update playhead position on timeline."""
+        if not hasattr(self, 'timeline_canvas') or not self.cap:
+            return
+        tw = self.timeline_canvas.winfo_width()
+        margin = 5
+        play_x = margin + (self.current_frame / self.total_frames) * (tw - 2 * margin)
+        self.timeline_canvas.coords(self.playhead, play_x, 0, play_x, 60)
 
     def _redraw(self):
         """Redraw the canvas with current frame and crop overlay."""
@@ -514,6 +652,7 @@ class VideoEditorApp:
         self.frame_entry.delete(0, tk.END)
         self.frame_entry.insert(0, str(self.current_frame))
         self._redraw()
+        self._update_playhead()
 
     def _on_frame_change(self, event):
         if not self.cap:
