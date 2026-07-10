@@ -178,6 +178,10 @@ class VideoEditorApp:
 
         self.info_label = ttk.Label(playback_frame, text="No video loaded")
         self.info_label.pack(pady=5)
+        
+        # Video info (resolution)
+        self.res_label = ttk.Label(playback_frame, text="Resolution: -", foreground="blue", font=("", 9, "bold"))
+        self.res_label.pack(pady=(0, 5))
 
         # Crop
         crop_frame = ttk.LabelFrame(right_panel, text="Crop Box")
@@ -205,6 +209,22 @@ class VideoEditorApp:
         # Export
         export_frame = ttk.LabelFrame(right_panel, text="Export")
         export_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        # FPS selection
+        fps_frame = ttk.Frame(export_frame)
+        fps_frame.pack(fill=tk.X, padx=5, pady=(5, 0))
+        ttk.Label(fps_frame, text="FPS:", font=("", 8)).pack(side=tk.LEFT, padx=5)
+        self.export_fps_var = tk.StringVar(value="Original")
+        self.export_fps_menu = ttk.Combobox(
+            fps_frame,
+            textvariable=self.export_fps_var,
+            values=["Original", "24", "30", "60", "120", "240"],
+            state="readonly",
+            width=10
+        )
+        self.export_fps_menu.pack(side=tk.LEFT, padx=5)
+        self.export_fps_menu.bind("<<ComboboxSelected>>", self._on_export_fps_select)
+        
         self.export_btn = ttk.Button(export_frame, text="Export Video", command=self._export_video)
         self.export_btn.pack(fill=tk.X, padx=5, pady=5)
         self.progress = ttk.Progressbar(export_frame, orient=tk.HORIZONTAL, length=200, mode="determinate")
@@ -279,6 +299,9 @@ class VideoEditorApp:
             self.total_frames_label.config(text=str(self.total_frames))
             self.total_frames_display.config(text=f"Total frames: {self.total_frames}")
             self.info_label.config(text=f"{self.fps:.1f} FPS | {self.total_frames} frames | {self.duration:.1f}s")
+            
+            # Show resolution
+            self.res_label.config(text=f"Resolution: {self.video_orig_w}x{self.video_orig_h}")
 
             self._recalc_video_display()
             self._fit_crop()
@@ -729,6 +752,10 @@ class VideoEditorApp:
         self._redraw()
         self._update_playhead()
         self._update_frame_scale_label()
+    
+    def _on_export_fps_select(self, event=None):
+        """Handle export FPS selection."""
+        pass
 
     def _update_frame_scale_label(self):
         """Update the frame scale label."""
@@ -860,12 +887,20 @@ class VideoEditorApp:
                 self.root.after(0, self._show_error, "Error", "Invalid timeline selection.")
                 return
 
+            # Get export FPS
+            fps_value = self.export_fps_var.get()
+            if fps_value == "Original":
+                export_fps = self.fps
+            else:
+                export_fps = int(fps_value)
+
             cmd = [
                 "ffmpeg", "-y",
                 "-ss", str(self.start_time),
                 "-i", self.video_path,
                 "-t", str(duration),
                 "-vf", f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y}",
+                "-r", str(export_fps),
                 "-c:v", "libx264",
                 "-preset", "medium",
                 "-crf", "18",
