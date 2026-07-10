@@ -1,63 +1,72 @@
 # SuperBasic Video Editor
 
-Een eenvoudige video editor met een GUI die werkt op Windows.
+A simple video editor with a GUI that runs on Windows.
 
 ## Features
 
-- **Video Upload**: Ondersteunt MP4, AVI, MOV, MKV, WMV, FLV bestanden
-- **Play Controls**: Play, Pause, Stop en frame-scrubbing
-- **Timeline Selectie**: Twee sliders om het begin- en eindpunt van de video te selecteren
-- **Crop Box**: Een interactieve selectie box die je kunt vergroten, verkleinen, verschuiven
-  - Sleep de **hoeken** om te resizen
-  - Sleep de **zijkanten** om de breedte/hoogte aan te passen
-  - Sleep de **binnenkant** om de box te verplaatsen
-- **Export**: Exporteer de geselecteerde timeframe met de crop instellingen
-- **Geen audio**: Audio wordt altijd genegeerd bij de output
-- **Hoogwaardige MP4**: Gebruikt libx264 codec met CRF 18 voor maximale kwaliteit
+- **Video Upload**: Supports MP4, AVI, MOV, MKV, WMV, FLV files
+- **Play Controls**: Play, Pause, Stop and frame-scrubbing
+- **Timeline Selection**: Two sliders to select the start and end points of the video
+- **Crop Box**: An interactive selection box that can be resized, shrunk, and moved
+  - Drag **corners** to resize
+  - Drag **edges** to adjust width/height
+  - Drag the **inside** to move the box
+- **Export**: Export the selected timeframe with crop settings
+- **No audio**: Audio is always ignored in the output
+- **High-quality MP4**: Uses libx264 codec with CRF 18 for maximum quality
+- **Export FPS**: Choose export frame rate (Original, 24, 30, 60, 120, 240)
+- **Resolution Display**: Shows the loaded video resolution
+- **Fixed Duration**: Lock end marker to start + N frames
+- **Crop Presets**: Quick aspect ratio/size presets
 
-## Vereisten
+## Requirements
 
 - **Python 3.8+**
-- **FFmpeg** (moet geïnstalleerd zijn en in PATH staan)
-  - Download van: https://ffmpeg.org/download.html
-  - Op Windows: voeg `ffmpeg\bin` toe aan je PATH environment variable
+- **FFmpeg** (must be installed and in PATH)
+  - Download from: https://ffmpeg.org/download.html
+  - On Windows: add `ffmpeg\bin` to your PATH environment variable
 
-## Installatie
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Gebruik
+## Usage
 
 ```bash
 python main.py
 ```
 
-## Hoe te gebruiken
+## How to Use
 
-1. **Upload een video** via de "Upload Video" button
-2. **Selecteer een timeframe** met de twee sliders (Start en End)
-3. **Selecteer een crop gebied** door te slepen in de preview:
-   - Sleep hoekpunten om te resizen
-   - Sleep zijkanten om breedte/hoogte aan te passen
-   - Sleep de binnenkant om te verplaatsen
-4. **Play/Pause/Stop** de video om het resultaat te bekijken
-5. **Exporteer** via de "Export Video" button
+1. **Upload a video** using the "Upload Video" button
+2. **Select a timeframe** with the two sliders (Start and End)
+3. **Select a crop area** by dragging in the preview:
+   - Drag corner handles to resize
+   - Drag edges to adjust width/height
+   - Drag the inside to move
+4. **Play/Pause/Stop** the video to preview
+5. **Export** via the "Export Video" button
 
-## Export instellingen
+## Export Settings
 
 - **Codec**: libx264 (H.264)
-- **Kwaliteit**: CRF 18 (hoogwaardig)
+- **Quality**: CRF 18 (high quality)
 - **Preset**: medium
-- **Pixel format**: yuv420p (brede compatibiliteit)
-- **Audio**: uitgeschakeld
+- **Pixel format**: yuv420p (wide compatibility)
+- **Audio**: disabled
+- **Frame rate**: User-selectable (Original, 24, 30, 60, 120, 240)
 
-## Bestandsstructuur
+## File Structure
 
 ```
 video_editor/
-├── main.py          # Hoofd applicatie
+├── main.py          # Main application
 ├── requirements.txt # Python dependencies
-└── README.md        # Dit bestand
+└── README.md        # This file
 ```
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
