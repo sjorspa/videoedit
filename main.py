@@ -763,12 +763,12 @@ class VideoEditorApp:
         while self.is_playing:
             current_time = self.current_frame / self.fps
             if current_time >= self.end_time:
-                self.is_playing = False
-                self.play_btn.config(text="Play")
+                self.root.after(0, self._pause)
                 break
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame)
             ret, frame = self.cap.read()
             if not ret:
+                self.root.after(0, self._pause)
                 break
             self.root.after(0, self._update_frame)
             self.current_frame += 1
