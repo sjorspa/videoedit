@@ -5,8 +5,9 @@ Runs on Windows with tkinter GUI.
 """
 
 # Disable FFmpeg async threading to prevent "async_lock failed" crashes on Windows
+# MUST be set before cv2 import
 import os
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "async;0"
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "async;0|thread_count;1"
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -257,10 +258,16 @@ class VideoEditorApp:
         self.root.update()
 
         try:
-            self.cap = cv2.VideoCapture(self.video_path)
+            # Try FFmpeg backend first (with async disabled)
+            self.cap = cv2.VideoCapture(self.video_path, cv2.CAP_FFMPEG)
+            if not self.cap.isOpened():
+                # Fallback to default backend
+                self.cap = cv2.VideoCapture(self.video_path)
             if not self.cap.isOpened():
                 messagebox.showerror("Error", "Failed to open video file.")
                 return
+            # Ensure no threading to prevent crashes
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
             self.fps = self.cap.get(cv2.CAP_PROP_FPS) or 30
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
