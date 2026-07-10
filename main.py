@@ -316,7 +316,7 @@ class VideoEditorApp:
             (self.crop_x + self.crop_w, self.crop_y + self.crop_h // 2),
         ]
         for ex, ey in edges:
-            self.canvas.create_ellipse(
+            self.canvas.create_oval(
                 ex - 6, ey - 6, ex + 6, ey + 6,
                 fill="white", outline="red", width=2
             )
