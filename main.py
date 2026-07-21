@@ -469,6 +469,8 @@ class VideoEditorApp:
             if self.end_time <= self.start_time:
                 self.end_time = min(self.duration, self.start_time + 0.1)
 
+        print(f"=== TIMELINE DRAG: dragging={self.dragging_timeline}, start_time={self.start_time:.4f}, end_time={self.end_time:.4f}, duration={self.end_time - self.start_time:.4f}, fixed_duration={self.fixed_duration}, fixed_duration_frames={self.fixed_duration_frames}, fps={self.fps}")
+
         self._draw_timeline()
         
         # Jump to the dragged frame when releasing
@@ -902,6 +904,16 @@ class VideoEditorApp:
     def _do_export(self, output_path, crop_x, crop_y, crop_w, crop_h):
         try:
             duration = self.end_time - self.start_time
+            
+            # Debug logging
+            print(f"=== EXPORT DEBUG ===")
+            print(f"  start_time = {self.start_time}")
+            print(f"  end_time   = {self.end_time}")
+            print(f"  duration   = {duration}")
+            print(f"  fps        = {self.fps}")
+            print(f"  total_frames = {self.total_frames}")
+            print(f"  video_path = {self.video_path}")
+            
             if duration <= 0:
                 self.root.after(0, self._show_error, "Error", "Invalid timeline selection.")
                 return
@@ -928,6 +940,9 @@ class VideoEditorApp:
                 "-movflags", "+faststart",
                 output_path
             ]
+            
+            print(f"  FFmpeg cmd: {' '.join(cmd)}")
+            print(f"====================")
 
             process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
@@ -989,7 +1004,11 @@ class VideoEditorApp:
         self.progress.config(value=100)
         self.status_label.config(text="Export complete!")
         self.status_bar.config(text=f"Exported to: {path}")
-        messagebox.showinfo("Success", f"Video exported!\\n\\n{path}")
+        messagebox.showinfo("Success", f"Video exported!\n\n"
+            f"Start: {self.start_time:.2f}s\n"
+            f"End: {self.end_time:.2f}s\n"
+            f"Duration: {self.end_time - self.start_time:.2f}s\n\n"
+            f"{path}")
 
     def _cleanup(self):
         if self.cap:
