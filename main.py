@@ -915,8 +915,8 @@ class VideoEditorApp:
 
             cmd = [
                 "ffmpeg", "-y",
-                "-ss", str(self.start_time),
                 "-i", self.video_path,
+                "-ss", str(self.start_time),
                 "-t", str(duration),
                 "-vf", f"crop={crop_w}:{crop_h}:{crop_x}:{crop_y}",
                 "-r", str(export_fps),
